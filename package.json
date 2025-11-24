@@ -1,0 +1,28 @@
+{
+	"name": "typespec-zod-emitter",
+	"version": "1.0.0",
+	"description": "TypeSpec emitter for Zod validators",
+	"type": "module",
+	"main": "dist/index.js",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js",
+			"typespec": "./tsp/main.tsp"
+		}
+	},
+	"scripts": {
+		"build": "tsc",
+		"watch": "tsc --watch",
+		"test": "npm run build"
+	},
+	"dependencies": {
+		"@typespec/compiler": "^1.4.0"
+	},
+	"devDependencies": {
+		"typescript": "^5.9.3"
+	},
+	"peerDependencies": {
+		"zod": "^3.0.0"
+	}
+}

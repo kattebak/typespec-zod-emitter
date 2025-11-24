@@ -1,0 +1,11 @@
+{
+	"name": "zod-validation-example",
+	"version": "1.0.0",
+	"type": "module",
+	"scripts": {
+		"test": "node example.js"
+	},
+	"dependencies": {
+		"zod": "^3.23.8"
+	}
+}
