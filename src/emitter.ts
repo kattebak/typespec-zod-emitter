@@ -43,8 +43,15 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 
 	const outputDir = context.emitterOutputDir;
 	const outputFile = context.options["output-file"] ?? "schemas.ts";
+	const packageName = context.options["package-name"];
+	const packageVersion = context.options["package-version"];
 
-	const content = generateZodSchemas(models, enums);
+	const content = generateZodSchemas(
+		models,
+		enums,
+		packageName,
+		packageVersion,
+	);
 
 	await emitFile(context.program, {
 		path: resolvePath(outputDir, outputFile),
@@ -62,8 +69,25 @@ function isTypeSpecIntrinsic(namespace: Namespace): boolean {
 	return intrinsicNamespaces.includes(namespace.name);
 }
 
-function generateZodSchemas(models: Model[], enums: Enum[]): string {
+function generateZodSchemas(
+	models: Model[],
+	enums: Enum[],
+	packageName?: string,
+	packageVersion?: string,
+): string {
 	const imports = 'import { z } from "zod";\n\n';
+
+	let header = "";
+	if (packageName || packageVersion) {
+		header = "/**\n";
+		if (packageName) {
+			header += ` * Package: ${packageName}\n`;
+		}
+		if (packageVersion) {
+			header += ` * Version: ${packageVersion}\n`;
+		}
+		header += " */\n\n";
+	}
 
 	const enumSchemas = enums
 		.map((enumType) => generateEnumSchema(enumType))
@@ -73,7 +97,9 @@ function generateZodSchemas(models: Model[], enums: Enum[]): string {
 		.map((model) => generateModelSchema(model))
 		.join("\n\n");
 
-	return imports + (enumSchemas ? enumSchemas + "\n\n" : "") + modelSchemas;
+	return (
+		imports + header + (enumSchemas ? enumSchemas + "\n\n" : "") + modelSchemas
+	);
 }
 
 function generateEnumSchema(enumType: Enum): string {
