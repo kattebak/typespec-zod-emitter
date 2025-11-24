@@ -82,6 +82,8 @@ emit:
 options:
   typespec-zod-emitter:
     output-file: "schemas.ts"
+    package-name: "my-api"
+    package-version: "1.0.0"
 ```
 
 ### 3. Compile
