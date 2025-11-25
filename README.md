@@ -143,37 +143,62 @@ export const ProfileSchema = z.object({
 });
 ```
 
-### 5. Use the Generated Schemas
+### 5. Generated package.json
 
-```typescript
+When both `package-name` and `package-version` are provided, a `package.json` is automatically generated:
+
+```json
+{
+  "name": "my-api",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./schemas.js",
+  "types": "./schemas.d.ts",
+  "exports": {
+    ".": {
+      "types": "./schemas.d.ts",
+      "default": "./schemas.js"
+    }
+  },
+  "peerDependencies": {
+    "zod": "^3.0.0"
+  }
+}
+```
+
+This allows the generated schemas to be published and consumed as a standalone npm package.
+
+### 6. Use the Generated Schemas```typescript
+
 import { UserSchema, PostSchema } from "./schemas";
 
 const userData = {
-  id: "123",
-  name: "John Doe",
-  email: "john@example.com",
-  isActive: true,
-  status: "Active",
-  priority: "high",
+id: "123",
+name: "John Doe",
+email: "john@example.com",
+isActive: true,
+status: "Active",
+priority: "high",
 };
 
 const validatedUser = UserSchema.parse(userData);
 
 const postData = {
-  id: "post-1",
-  title: "My First Post",
-  content: "Hello World",
-  authorId: "123",
-  tags: ["intro", "hello"],
-  metadata: { category: "blog" },
-  published: true,
-  createdAt: new Date(),
+id: "post-1",
+title: "My First Post",
+content: "Hello World",
+authorId: "123",
+tags: ["intro", "hello"],
+metadata: { category: "blog" },
+published: true,
+createdAt: new Date(),
 };
 
 const validatedPost = PostSchema.parse(postData);
 
 type User = z.infer<typeof UserSchema>;
 type Post = z.infer<typeof PostSchema>;
+
 ```
 
 ## Configuration Options
@@ -182,6 +207,8 @@ type Post = z.infer<typeof PostSchema>;
 - `output-dir`: Output directory (defaults to emitter output directory)
 - `package-name`: Package name to include in generated file header (optional)
 - `package-version`: Package version to include in generated file header (optional)
+
+**Note:** When both `package-name` and `package-version` are provided, the emitter will also generate a `package.json` file, allowing the generated schemas to be consumed as an npm package.
 
 ## Supported TypeSpec Types
 
@@ -231,3 +258,4 @@ Built using the TypeSpec emitter framework:
 - Data transformation pipelines
 - Type-safe database queries
 - GraphQL schema validation
+```
