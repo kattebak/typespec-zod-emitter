@@ -1,15 +1,15 @@
+import type { EmitContext } from "@typespec/compiler";
 import {
 	type Enum,
+	emitFile,
 	type Model,
 	type ModelProperty,
 	type Namespace,
+	resolvePath,
 	type Scalar,
 	type Type,
 	type Union,
-	emitFile,
-	resolvePath,
 } from "@typespec/compiler";
-import type { EmitContext } from "@typespec/compiler";
 import type { ZodEmitterOptions } from "./lib.js";
 
 export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
@@ -98,7 +98,7 @@ function generateZodSchemas(
 		.join("\n\n");
 
 	return (
-		imports + header + (enumSchemas ? enumSchemas + "\n\n" : "") + modelSchemas
+		imports + header + (enumSchemas ? `${enumSchemas}\n\n` : "") + modelSchemas
 	);
 }
 

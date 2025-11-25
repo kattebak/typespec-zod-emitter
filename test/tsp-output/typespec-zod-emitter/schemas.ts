@@ -11,7 +11,7 @@ export const UserSchema = z.object({
 	age: z.number().optional(),
 	isActive: z.boolean(),
 	status: StatusSchema,
-	priority: PrioritySchema
+	priority: PrioritySchema,
 });
 
 export const PostSchema = z.object({
@@ -22,14 +22,14 @@ export const PostSchema = z.object({
 	tags: z.array(z.string()),
 	metadata: z.record(z.string(), z.string()),
 	published: z.boolean(),
-	createdAt: z.date()
+	createdAt: z.date(),
 });
 
 export const AddressSchema = z.object({
 	street: z.string(),
 	city: z.string(),
 	zipCode: z.string(),
-	country: z.string()
+	country: z.string(),
 });
 
 export const ProfileSchema = z.object({
@@ -37,11 +37,11 @@ export const ProfileSchema = z.object({
 	bio: z.string().optional(),
 	avatar: z.string().optional(),
 	address: AddressSchema,
-	socialLinks: z.array(z.string())
+	socialLinks: z.array(z.string()),
 });
 
 export const ApiResponseSchema = z.object({
 	success: z.boolean(),
 	data: z.unknown(),
-	error: z.string().optional()
+	error: z.string().optional(),
 });

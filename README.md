@@ -97,44 +97,49 @@ npx tsp compile .
 ```typescript
 import { z } from "zod";
 
+/**
+ * Package: my-api
+ * Version: 1.0.0
+ */
+
 export const StatusSchema = z.enum(["Active", "Inactive", "Pending"]);
 
 export const PrioritySchema = z.enum(["low", "medium", "high"]);
 
 export const UserSchema = z.object({
-	id: z.string(),
-	name: z.string(),
-	email: z.string(),
-	age: z.number().optional(),
-	isActive: z.boolean(),
-	status: StatusSchema,
-	priority: PrioritySchema,
+  id: z.string(),
+  name: z.string(),
+  email: z.string(),
+  age: z.number().optional(),
+  isActive: z.boolean(),
+  status: StatusSchema,
+  priority: PrioritySchema,
 });
 
 export const PostSchema = z.object({
-	id: z.string(),
-	title: z.string(),
-	content: z.string(),
-	authorId: z.string(),
-	tags: z.array(z.string()),
-	metadata: z.record(z.string(), z.string()),
-	published: z.boolean(),
-	createdAt: z.date(),
+  id: z.string(),
+  title: z.string(),
+  content: z.string(),
+  authorId: z.string(),
+  tags: z.array(z.string()),
+  metadata: z.record(z.string(), z.string()),
+  published: z.boolean(),
+  createdAt: z.date(),
 });
 
 export const AddressSchema = z.object({
-	street: z.string(),
-	city: z.string(),
-	zipCode: z.string(),
-	country: z.string(),
+  street: z.string(),
+  city: z.string(),
+  zipCode: z.string(),
+  country: z.string(),
 });
 
 export const ProfileSchema = z.object({
-	userId: z.string(),
-	bio: z.string().optional(),
-	avatar: z.string().optional(),
-	address: AddressSchema,
-	socialLinks: z.array(z.string()),
+  userId: z.string(),
+  bio: z.string().optional(),
+  avatar: z.string().optional(),
+  address: AddressSchema,
+  socialLinks: z.array(z.string()),
 });
 ```
 
@@ -144,25 +149,25 @@ export const ProfileSchema = z.object({
 import { UserSchema, PostSchema } from "./schemas";
 
 const userData = {
-	id: "123",
-	name: "John Doe",
-	email: "john@example.com",
-	isActive: true,
-	status: "Active",
-	priority: "high",
+  id: "123",
+  name: "John Doe",
+  email: "john@example.com",
+  isActive: true,
+  status: "Active",
+  priority: "high",
 };
 
 const validatedUser = UserSchema.parse(userData);
 
 const postData = {
-	id: "post-1",
-	title: "My First Post",
-	content: "Hello World",
-	authorId: "123",
-	tags: ["intro", "hello"],
-	metadata: { category: "blog" },
-	published: true,
-	createdAt: new Date(),
+  id: "post-1",
+  title: "My First Post",
+  content: "Hello World",
+  authorId: "123",
+  tags: ["intro", "hello"],
+  metadata: { category: "blog" },
+  published: true,
+  createdAt: new Date(),
 };
 
 const validatedPost = PostSchema.parse(postData);
@@ -175,6 +180,8 @@ type Post = z.infer<typeof PostSchema>;
 
 - `output-file`: Name of the output file (default: "schemas.ts")
 - `output-dir`: Output directory (defaults to emitter output directory)
+- `package-name`: Package name to include in generated file header (optional)
+- `package-version`: Package version to include in generated file header (optional)
 
 ## Supported TypeSpec Types
 
