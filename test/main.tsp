@@ -96,6 +96,52 @@ model EmptyObjectTest {
   emptyData: {};
 }
 
+// Test lifecycle transformations (Create/Update)
+// This tests the edge case where lifecycle-transformed models
+// like Create<T> generate inline schemas instead of broken references
+
+model ProductAttribute {
+  @visibility(Lifecycle.Read)
+  attributeId: string;
+
+  @visibility(Lifecycle.Read)
+  productId: string;
+
+  @visibility(Lifecycle.Read, Lifecycle.Create)
+  key: string;
+
+  value: string;
+}
+
+model Product {
+  @visibility(Lifecycle.Read)
+  productId: string;
+
+  @visibility(Lifecycle.Read, Lifecycle.Create)
+  name: string;
+
+  @visibility(Lifecycle.Read, Lifecycle.Create)
+  price: float64;
+
+  @visibility(Lifecycle.Read, Lifecycle.Create)
+  inStock: boolean;
+
+  @visibility(Lifecycle.Read, Lifecycle.Create)
+  attributes: ProductAttribute[];
+
+  @visibility(Lifecycle.Read)
+  createdAt: int64;
+
+  @visibility(Lifecycle.Read)
+  updatedAt: int64;
+}
+
+// These use lifecycle transforms which create synthetic models
+model ProductCreateParams is Create<Product>;
+model ProductUpdateParams is Update<Product>;
+model ProductAttributeCreateParams is Create<ProductAttribute>;
+model ProductAttributeUpdateParams is Update<ProductAttribute>;
+
 // Test edge case: property names that need quoting
 model InvalidIdentifiers {
   "kebab-case": string;
