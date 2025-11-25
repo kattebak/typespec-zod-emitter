@@ -10,30 +10,21 @@ import {
 	type Type,
 	type Union,
 } from "@typespec/compiler";
-import { $ } from "@typespec/compiler/typekit";
 import type { ZodEmitterOptions } from "./lib.js";
 
 export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 	const models: Model[] = [];
 	const enums: Enum[] = [];
-	const typekit = $(context.program);
 
 	function collectTypes(namespace: Namespace) {
 		for (const [_, model] of namespace.models) {
-			if (
-				!isIntrinsicModel(model) &&
-				!isTypeSpecIntrinsic(namespace) &&
-				typekit.type.isUserDefined(model)
-			) {
+			if (!isIntrinsicModel(model) && !isTypeSpecIntrinsic(namespace)) {
 				models.push(model);
 			}
 		}
 
 		for (const [_, enumType] of namespace.enums) {
-			if (
-				!isTypeSpecIntrinsic(namespace) &&
-				typekit.type.isUserDefined(enumType)
-			) {
+			if (!isTypeSpecIntrinsic(namespace)) {
 				enums.push(enumType);
 			}
 		}
