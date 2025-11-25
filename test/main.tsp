@@ -1,4 +1,4 @@
-import "typespec-zod-emitter";
+import "@kattebak/typespec-zod-emitter";
 
 enum Status {
 	Active,

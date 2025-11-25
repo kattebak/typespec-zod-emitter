@@ -1,8 +1,8 @@
 import {
-	UserSchema,
 	PostSchema,
 	ProfileSchema,
-} from "./tsp-output/typespec-zod-emitter/schemas.ts";
+	UserSchema,
+} from "../build/zod-schemas/schemas.ts";
 
 console.log("=== Zod Validation Examples ===\n");
 
@@ -75,7 +75,7 @@ try {
 		published: true,
 		createdAt: new Date(),
 	};
-	const result = PostSchema.parse(validPost);
+	const _result = PostSchema.parse(validPost);
 	console.log("✓ Valid post created");
 } catch (error) {
 	console.log("✗ Error:", error.message);
@@ -93,7 +93,7 @@ try {
 		},
 		socialLinks: ["https://twitter.com/johndoe"],
 	};
-	const result = ProfileSchema.parse(minimalProfile);
+	const _result = ProfileSchema.parse(minimalProfile);
 	console.log("✓ Valid profile (optional fields omitted)");
 } catch (error) {
 	console.log("✗ Error:", error.message);
