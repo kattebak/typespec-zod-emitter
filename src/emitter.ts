@@ -108,6 +108,91 @@ function isTypeSpecIntrinsic(namespace: Namespace): boolean {
 	return intrinsicNamespaces.includes(namespace.name);
 }
 
+function getModelDependencies(model: Model): Set<string> {
+	const dependencies = new Set<string>();
+
+	function extractDependencies(type: Type): void {
+		switch (type.kind) {
+			case "Model":
+				// Skip intrinsic models like Array, Record
+				if (!isIntrinsicModel(type) && type.name) {
+					dependencies.add(type.name);
+				}
+				// Check indexer for Record types
+				if (type.indexer?.value) {
+					extractDependencies(type.indexer.value);
+				}
+				break;
+			case "Enum":
+				if (type.name) {
+					dependencies.add(type.name);
+				}
+				break;
+			case "Union":
+				for (const variant of type.variants.values()) {
+					extractDependencies(variant.type);
+				}
+				break;
+		}
+	}
+
+	// Extract dependencies from all properties
+	for (const [_, prop] of model.properties) {
+		extractDependencies(prop.type);
+	}
+
+	// Remove self-reference
+	dependencies.delete(model.name);
+
+	return dependencies;
+}
+
+function topologicalSort(models: Model[], enums: Enum[]): Model[] {
+	const enumNames = new Set(enums.map((e) => e.name));
+	const modelMap = new Map(models.map((m) => [m.name, m]));
+	const visited = new Set<string>();
+	const visiting = new Set<string>();
+	const sorted: Model[] = [];
+
+	function visit(modelName: string): void {
+		if (visited.has(modelName)) {
+			return;
+		}
+
+		// Skip if it's an enum or doesn't exist in our model map
+		if (enumNames.has(modelName) || !modelMap.has(modelName)) {
+			return;
+		}
+
+		if (visiting.has(modelName)) {
+			// Circular dependency detected - skip to avoid infinite loop
+			return;
+		}
+
+		visiting.add(modelName);
+		const model = modelMap.get(modelName);
+		if (!model) {
+			return;
+		}
+		const dependencies = getModelDependencies(model);
+
+		for (const dep of dependencies) {
+			visit(dep);
+		}
+
+		visiting.delete(modelName);
+		visited.add(modelName);
+		sorted.push(model);
+	}
+
+	// Visit all models
+	for (const model of models) {
+		visit(model.name);
+	}
+
+	return sorted;
+}
+
 function generateZodSchemas(
 	models: Model[],
 	enums: Enum[],
@@ -128,11 +213,14 @@ function generateZodSchemas(
 		header += " */\n\n";
 	}
 
+	// Sort models topologically to ensure dependencies come first
+	const sortedModels = topologicalSort(models, enums);
+
 	const enumSchemas = enums
 		.map((enumType) => generateEnumSchema(enumType))
 		.join("\n\n");
 
-	const modelSchemas = models
+	const modelSchemas = sortedModels
 		.map((model) => generateModelSchema(model))
 		.join("\n\n");
 
