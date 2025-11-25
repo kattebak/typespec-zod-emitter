@@ -264,3 +264,26 @@ type Post = z.infer<typeof PostSchema>;
 - Enums → `z.enum([...])`
 - Unions → `z.union([...])`
 - Optional properties → `.optional()`
+
+## Limitations
+
+### Generic/Template Models
+
+The emitter focuses on plain, concrete models and **does not emit** generic template declarations. For example:
+
+```typespec
+// This will NOT be emitted (template declaration)
+model ResultList<T> {
+  @continuationToken continuationToken?: string;
+  items: T[];
+}
+
+// This WILL be emitted (concrete model)
+model UserResultList {
+  ...ResultList<User>;
+}
+```
+
+**Reason:** Generic types with unbound type parameters cannot be directly converted to Zod schemas since Zod requires concrete types. The emitter skips these to avoid generating broken schemas.
+
+**Workaround:** Create concrete instantiations of generic templates using the spread operator (`...`) as shown above, or define your models without generic parameters.

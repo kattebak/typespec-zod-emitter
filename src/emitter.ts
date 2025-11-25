@@ -23,7 +23,8 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 			if (
 				!isIntrinsicModel(model) &&
 				!isTypeSpecIntrinsic(namespace) &&
-				typekit.type.isUserDefined(model)
+				typekit.type.isUserDefined(model) &&
+				!isTemplateDeclaration(model)
 			) {
 				models.push(model);
 			}
@@ -106,6 +107,46 @@ function isIntrinsicModel(model: Model): boolean {
 function isTypeSpecIntrinsic(namespace: Namespace): boolean {
 	const intrinsicNamespaces = ["TypeSpec", "Reflection"];
 	return intrinsicNamespaces.includes(namespace.name);
+}
+
+function isTemplateDeclaration(model: Model): boolean {
+	// Models with template parameters are template declarations (not instantiations)
+	// e.g., model ResultList<T> { items: T[] }
+	// We skip these because they can't be directly converted to Zod schemas
+
+	// Check if the model declaration has template parameters in its syntax node
+	if (model.node && "templateParameters" in model.node) {
+		const templateParams = (
+			model.node as { templateParameters?: readonly unknown[] }
+		).templateParameters;
+		if (templateParams && templateParams.length > 0) {
+			return true;
+		}
+	}
+
+	// Also check if any property has a type that is or contains a TemplateParameter
+	for (const [_, prop] of model.properties) {
+		if (containsTemplateParameter(prop.type)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+function containsTemplateParameter(type: Type): boolean {
+	if (type.kind === "TemplateParameter") {
+		return true;
+	}
+
+	if (type.kind === "Model") {
+		// Check array types like T[]
+		if (type.name === "Array" && type.indexer) {
+			return containsTemplateParameter(type.indexer.value);
+		}
+	}
+
+	return false;
 }
 
 function getModelDependencies(model: Model): Set<string> {
