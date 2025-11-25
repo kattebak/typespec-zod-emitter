@@ -64,3 +64,34 @@ model ResultList<T> {
 model UserList {
   ...ResultList<User>;
 }
+
+// Test anonymous object edge case
+model Item {
+  id: string;
+  name: string;
+}
+
+model ItemUpload {
+  item: Item;
+  // edge case: anonymous object rendered as schema
+  urls: {
+    s3: string;
+  };
+}
+
+// Test more complex anonymous objects
+model ComplexUpload {
+  metadata: {
+    author: string;
+    tags: string[];
+    settings?: {
+      visibility: "public" | "private";
+      downloadable: boolean;
+    };
+  };
+}
+
+// Test edge case: empty anonymous object
+model EmptyObjectTest {
+  emptyData: {};
+}

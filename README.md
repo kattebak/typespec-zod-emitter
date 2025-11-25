@@ -261,9 +261,35 @@ type Post = z.infer<typeof PostSchema>;
 - `Array<T>` or `T[]` → `z.array(T)`
 - `Record<string>` → `z.record(z.string(), z.string())`
 - Nested objects → Referenced schemas
+- Anonymous objects → Inline `z.object({...})`
 - Enums → `z.enum([...])`
 - Unions → `z.union([...])`
 - Optional properties → `.optional()`
+
+### Anonymous Object Literals
+
+Anonymous object types are converted to inline Zod objects:
+
+```typespec
+model ItemUpload {
+  item: Item;
+  urls: {
+    s3: string;
+    cloudfront?: string;
+  };
+}
+```
+
+Generates:
+
+```typescript
+export const ItemUploadSchema = z.object({
+  item: ItemSchema,
+  urls: z.object({ s3: z.string(), cloudfront: z.string().optional() }),
+});
+```
+
+This works for deeply nested anonymous objects as well.
 
 ## Limitations
 
