@@ -384,6 +384,18 @@ function generateModelTypeSchema(model: Model): string {
 		return `z.record(z.string(), ${generateTypeSchema(valueType)})`;
 	}
 
+	// Handle anonymous object literals (inline object types)
+	if (!model.name || model.name === "" || model.name === "object") {
+		const properties: string[] = [];
+		for (const [propName, prop] of model.properties) {
+			const zodType = generatePropertySchema(prop);
+			properties.push(`${propName}: ${zodType}`);
+		}
+		const schemaBody =
+			properties.length > 0 ? `{ ${properties.join(", ")} }` : "{}";
+		return `z.object(${schemaBody})`;
+	}
+
 	return `${model.name}Schema`;
 }
 
