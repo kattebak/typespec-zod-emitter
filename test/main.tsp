@@ -95,3 +95,31 @@ model ComplexUpload {
 model EmptyObjectTest {
   emptyData: {};
 }
+
+// Test edge case: property names that need quoting
+model InvalidIdentifiers {
+  "kebab-case": string;
+  "with space": string;
+  "123numeric": string;
+  "special@char": string;
+  normalKey: string;
+}
+
+
+// Test invalid identifiers in anonymous objects
+model AnonymousWithInvalidKeys {
+  data: {
+    "kebab-case": string;
+    "another-kebab": int32;
+    validKey: boolean;
+  };
+}
+
+// Test JavaScript reserved words
+model ReservedWords {
+  "class": string;
+  "const": string;
+  "return": string;
+  "function": string;
+  normalProp: string;
+}
