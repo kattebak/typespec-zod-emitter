@@ -143,9 +143,11 @@ export const ProfileSchema = z.object({
 });
 ```
 
-### 5. Generated package.json
+### 5. Generated Package Files
 
-When both `package-name` and `package-version` are provided, a `package.json` is automatically generated:
+When both `package-name` and `package-version` are provided, a complete npm package is automatically generated with the following files:
+
+#### package.json
 
 ```json
 {
@@ -166,39 +168,68 @@ When both `package-name` and `package-version` are provided, a `package.json` is
 }
 ```
 
-This allows the generated schemas to be published and consumed as a standalone npm package.
+#### README.md
 
-### 6. Use the Generated Schemas```typescript
+A generated README with installation instructions, usage examples, and a list of all available schemas.
 
+#### tsconfig.json
+
+TypeScript configuration optimized for ES modules with declaration file generation.
+
+#### .npmignore
+
+Configured to exclude source files and development artifacts from the published package.
+
+### 6. Building the Package
+
+To compile the TypeScript schemas to JavaScript:
+
+```bash
+cd tsp-output/@kattebak/typespec-zod-emitter
+npm install zod typescript
+npx tsc
+```
+
+This generates:
+
+- `schemas.js` - Compiled JavaScript
+- `schemas.d.ts` - TypeScript declarations
+- `schemas.d.ts.map` - Declaration source maps
+- `schemas.js.map` - JavaScript source maps
+
+The package is now ready to be published to npm or consumed locally.
+
+### 7. Use the Generated Schemas
+
+```typescript
 import { UserSchema, PostSchema } from "./schemas";
 
 const userData = {
-id: "123",
-name: "John Doe",
-email: "john@example.com",
-isActive: true,
-status: "Active",
-priority: "high",
+  id: "123",
+  name: "John Doe",
+  email: "john@example.com",
+  isActive: true,
+  status: "Active",
+  priority: "high",
 };
 
 const validatedUser = UserSchema.parse(userData);
 
 const postData = {
-id: "post-1",
-title: "My First Post",
-content: "Hello World",
-authorId: "123",
-tags: ["intro", "hello"],
-metadata: { category: "blog" },
-published: true,
-createdAt: new Date(),
+  id: "post-1",
+  title: "My First Post",
+  content: "Hello World",
+  authorId: "123",
+  tags: ["intro", "hello"],
+  metadata: { category: "blog" },
+  published: true,
+  createdAt: new Date(),
 };
 
 const validatedPost = PostSchema.parse(postData);
 
 type User = z.infer<typeof UserSchema>;
 type Post = z.infer<typeof PostSchema>;
-
 ```
 
 ## Configuration Options
@@ -208,7 +239,12 @@ type Post = z.infer<typeof PostSchema>;
 - `package-name`: Package name to include in generated file header (optional)
 - `package-version`: Package version to include in generated file header (optional)
 
-**Note:** When both `package-name` and `package-version` are provided, the emitter will also generate a `package.json` file, allowing the generated schemas to be consumed as an npm package.
+**Note:** When both `package-name` and `package-version` are provided, the emitter generates a complete npm package with:
+
+- `package.json` - Package manifest with proper ES module configuration
+- `README.md` - Auto-generated documentation with usage examples
+- `tsconfig.json` - TypeScript configuration for building the package
+- `.npmignore` - Excludes development files from npm publish
 
 ## Supported TypeSpec Types
 
@@ -258,4 +294,3 @@ Built using the TypeSpec emitter framework:
 - Data transformation pipelines
 - Type-safe database queries
 - GraphQL schema validation
-```
