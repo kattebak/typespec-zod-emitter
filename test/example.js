@@ -2,7 +2,7 @@ import {
 	PostSchema,
 	ProfileSchema,
 	UserSchema,
-} from "./tsp-output/typespec-zod-emitter/schemas.ts";
+} from "../build/zod-schemas/schemas.ts";
 
 console.log("=== Zod Validation Examples ===\n");
 

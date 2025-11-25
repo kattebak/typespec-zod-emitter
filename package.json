@@ -23,8 +23,9 @@
 		"lint": "npx @biomejs/biome check",
 		"build": "tsc",
 		"watch": "tsc --watch",
-		"test": "npm run build && npm run lint && npm run test:emit",
-		"test:emit": "tsp compile test/main.tsp --config test/tspconfig.yaml"
+		"test": "npm run build && npm run lint && npm run test:emit && npm run test:example",
+		"test:emit": "tsp compile test/main.tsp --config test/tspconfig.yaml",
+		"test:example": "node test/example.js"
 	},
 	"dependencies": {
 		"@typespec/compiler": "^1.4.0"
