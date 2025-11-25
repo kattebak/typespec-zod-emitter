@@ -53,3 +53,14 @@ model ApiResponse<T> {
 	data: T;
 	error?: string;
 }
+
+// Test generic template - should NOT be emitted
+model ResultList<T> {
+  continuationToken?: string;
+  items: T[];
+}
+
+// Test concrete instantiation - SHOULD be emitted
+model UserList {
+  ...ResultList<User>;
+}
