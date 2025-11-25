@@ -1,5 +1,5 @@
 {
-	"name": "typespec-zod-emitter",
+	"name": "@kattebak/typespec-zod-emitter",
 	"version": "1.0.0",
 	"description": "TypeSpec emitter for Zod validators",
 	"type": "module",
@@ -7,6 +7,10 @@
 	"publishConfig": {
 		"access": "public"
 	},
+	"files": [
+		"dist",
+		"tsp"
+	],
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
@@ -19,7 +23,8 @@
 		"lint": "npx @biomejs/biome check",
 		"build": "tsc",
 		"watch": "tsc --watch",
-		"test": "npm run build"
+		"test": "npm run build && npm run lint && npm run test:emit",
+		"test:emit": "tsp compile test/main.tsp --config test/tspconfig.yaml"
 	},
 	"dependencies": {
 		"@typespec/compiler": "^1.4.0"
