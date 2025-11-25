@@ -285,12 +285,75 @@ function generateEnumSchema(enumType: Enum): string {
 	return `export const ${enumType.name}Schema = z.enum([${values.join(", ")}]);`;
 }
 
+function isValidJavaScriptIdentifier(name: string): boolean {
+	// Check if the name is a valid JavaScript identifier
+	// Valid identifiers start with a letter, underscore, or dollar sign
+	// and contain only letters, digits, underscores, or dollar signs
+	const identifierRegex = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
+	return identifierRegex.test(name) && !isReservedWord(name);
+}
+
+function isReservedWord(name: string): boolean {
+	// JavaScript reserved words that need quoting
+	const reserved = new Set([
+		"break",
+		"case",
+		"catch",
+		"class",
+		"const",
+		"continue",
+		"debugger",
+		"default",
+		"delete",
+		"do",
+		"else",
+		"export",
+		"extends",
+		"finally",
+		"for",
+		"function",
+		"if",
+		"import",
+		"in",
+		"instanceof",
+		"new",
+		"return",
+		"super",
+		"switch",
+		"this",
+		"throw",
+		"try",
+		"typeof",
+		"var",
+		"void",
+		"while",
+		"with",
+		"yield",
+		"let",
+		"static",
+		"enum",
+		"await",
+		"implements",
+		"interface",
+		"package",
+		"private",
+		"protected",
+		"public",
+	]);
+	return reserved.has(name);
+}
+
+function quotePropertyName(name: string): string {
+	return isValidJavaScriptIdentifier(name) ? name : `"${name}"`;
+}
+
 function generateModelSchema(model: Model): string {
 	const properties: string[] = [];
 
 	for (const [propName, prop] of model.properties) {
 		const zodType = generatePropertySchema(prop);
-		properties.push(`\t${propName}: ${zodType}`);
+		const quotedName = quotePropertyName(propName);
+		properties.push(`\t${quotedName}: ${zodType}`);
 	}
 
 	const schemaBody =
@@ -389,7 +452,8 @@ function generateModelTypeSchema(model: Model): string {
 		const properties: string[] = [];
 		for (const [propName, prop] of model.properties) {
 			const zodType = generatePropertySchema(prop);
-			properties.push(`${propName}: ${zodType}`);
+			const quotedName = quotePropertyName(propName);
+			properties.push(`${quotedName}: ${zodType}`);
 		}
 		const schemaBody =
 			properties.length > 0 ? `{ ${properties.join(", ")} }` : "{}";
