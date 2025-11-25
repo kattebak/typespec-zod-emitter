@@ -16,6 +16,7 @@ import type { ZodEmitterOptions } from "./lib.js";
 export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 	const models: Model[] = [];
 	const enums: Enum[] = [];
+	const modelNameMap = new Map<Model, string>();
 	const typekit = $(context.program);
 
 	function collectTypes(namespace: Namespace) {
@@ -27,6 +28,8 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 				!isTemplateDeclaration(model)
 			) {
 				models.push(model);
+				// Store the declared name for this model
+				modelNameMap.set(model, model.name);
 			}
 		}
 
@@ -61,6 +64,7 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 		enums,
 		packageName,
 		packageVersion,
+		modelNameMap,
 	);
 
 	await emitFile(context.program, {
@@ -239,6 +243,7 @@ function generateZodSchemas(
 	enums: Enum[],
 	packageName?: string,
 	packageVersion?: string,
+	modelNameMap?: Map<Model, string>,
 ): string {
 	const imports = 'import { z } from "zod";\n\n';
 
@@ -262,7 +267,7 @@ function generateZodSchemas(
 		.join("\n\n");
 
 	const modelSchemas = sortedModels
-		.map((model) => generateModelSchema(model))
+		.map((model) => generateModelSchema(model, modelNameMap))
 		.join("\n\n");
 
 	return (
@@ -347,11 +352,14 @@ function quotePropertyName(name: string): string {
 	return isValidJavaScriptIdentifier(name) ? name : `"${name}"`;
 }
 
-function generateModelSchema(model: Model): string {
+function generateModelSchema(
+	model: Model,
+	modelNameMap?: Map<Model, string>,
+): string {
 	const properties: string[] = [];
 
 	for (const [propName, prop] of model.properties) {
-		const zodType = generatePropertySchema(prop);
+		const zodType = generatePropertySchema(prop, modelNameMap);
 		const quotedName = quotePropertyName(propName);
 		properties.push(`\t${quotedName}: ${zodType}`);
 	}
@@ -362,8 +370,11 @@ function generateModelSchema(model: Model): string {
 	return `export const ${model.name}Schema = z.object(${schemaBody});`;
 }
 
-function generatePropertySchema(prop: ModelProperty): string {
-	let schema = generateTypeSchema(prop.type);
+function generatePropertySchema(
+	prop: ModelProperty,
+	modelNameMap?: Map<Model, string>,
+): string {
+	let schema = generateTypeSchema(prop.type, modelNameMap);
 
 	if (prop.optional) {
 		schema += ".optional()";
@@ -372,16 +383,19 @@ function generatePropertySchema(prop: ModelProperty): string {
 	return schema;
 }
 
-function generateTypeSchema(type: Type): string {
+function generateTypeSchema(
+	type: Type,
+	modelNameMap?: Map<Model, string>,
+): string {
 	switch (type.kind) {
 		case "Scalar":
 			return generateScalarSchema(type);
 		case "Model":
-			return generateModelTypeSchema(type);
+			return generateModelTypeSchema(type, modelNameMap);
 		case "Enum":
 			return `${type.name}Schema`;
 		case "Union":
-			return generateUnionSchema(type);
+			return generateUnionSchema(type, modelNameMap);
 		case "String":
 			return `z.literal("${type.value}")`;
 		case "Number":
@@ -436,22 +450,45 @@ function generateScalarSchema(scalar: Scalar): string {
 	}
 }
 
-function generateModelTypeSchema(model: Model): string {
+function generateModelTypeSchema(
+	model: Model,
+	modelNameMap?: Map<Model, string>,
+): string {
 	if (model.name === "Array" && model.indexer?.value) {
 		const elementType = model.indexer.value;
-		return `z.array(${generateTypeSchema(elementType)})`;
+		return `z.array(${generateTypeSchema(elementType, modelNameMap)})`;
 	}
 
 	if (model.indexer && model.indexer.key.name === "string") {
 		const valueType = model.indexer.value;
-		return `z.record(z.string(), ${generateTypeSchema(valueType)})`;
+		return `z.record(z.string(), ${generateTypeSchema(valueType, modelNameMap)})`;
 	}
 
 	// Handle anonymous object literals (inline object types)
 	if (!model.name || model.name === "" || model.name === "object") {
 		const properties: string[] = [];
 		for (const [propName, prop] of model.properties) {
-			const zodType = generatePropertySchema(prop);
+			const zodType = generatePropertySchema(prop, modelNameMap);
+			const quotedName = quotePropertyName(propName);
+			properties.push(`${quotedName}: ${zodType}`);
+		}
+		const schemaBody =
+			properties.length > 0 ? `{ ${properties.join(", ")} }` : "{}";
+		return `z.object(${schemaBody})`;
+	}
+
+	// Check if this model is in our declared models map
+	if (modelNameMap) {
+		const declaredName = modelNameMap.get(model);
+		if (declaredName) {
+			return `${declaredName}Schema`;
+		}
+
+		// Model is not in our declared models (e.g., lifecycle-transformed models like Create<T>)
+		// Generate it inline as an anonymous object
+		const properties: string[] = [];
+		for (const [propName, prop] of model.properties) {
+			const zodType = generatePropertySchema(prop, modelNameMap);
 			const quotedName = quotePropertyName(propName);
 			properties.push(`${quotedName}: ${zodType}`);
 		}
@@ -463,7 +500,10 @@ function generateModelTypeSchema(model: Model): string {
 	return `${model.name}Schema`;
 }
 
-function generateUnionSchema(union: Union): string {
+function generateUnionSchema(
+	union: Union,
+	modelNameMap?: Map<Model, string>,
+): string {
 	const variants = Array.from(union.variants.values());
 
 	if (variants.length === 0) {
@@ -471,10 +511,12 @@ function generateUnionSchema(union: Union): string {
 	}
 
 	if (variants.length === 1) {
-		return generateTypeSchema(variants[0].type);
+		return generateTypeSchema(variants[0].type, modelNameMap);
 	}
 
-	const schemas = variants.map((variant) => generateTypeSchema(variant.type));
+	const schemas = variants.map((variant) =>
+		generateTypeSchema(variant.type, modelNameMap),
+	);
 
 	return `z.union([${schemas.join(", ")}])`;
 }
