@@ -435,10 +435,13 @@ function generateScalarSchema(scalar: Scalar): string {
 		case "boolean":
 			return "z.boolean()";
 		case "plainDate":
+			return "z.string().date()";
 		case "plainTime":
+			return "z.string().time()";
 		case "utcDateTime":
+			return "z.string().datetime()";
 		case "offsetDateTime":
-			return "z.date()";
+			return "z.string().datetime({ offset: true })";
 		case "duration":
 			return "z.string()";
 		case "url":
