@@ -23,16 +23,19 @@
 		"lint": "npx @biomejs/biome check",
 		"build": "tsc",
 		"watch": "tsc --watch",
-		"test": "npm run build && npm run lint && npm run test:emit && npm run test:example",
+		"test": "npm run build && npm run lint && npm run test:unit && npm run test:emit && npm run test:example",
 		"test:emit": "tsp compile test/main.tsp --config test/tspconfig.yaml",
-		"test:example": "node test/example.js"
+		"test:example": "npm run test:emit && node --test test/example.js",
+		"test:unit": "node --test --import=tsx src/**/*.test.ts"
 	},
 	"dependencies": {
 		"@typespec/compiler": "^1.4.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.3.7",
-		"typescript": "^5.9.3"
+		"tsx": "^4.20.5",
+		"typescript": "^5.9.3",
+		"zod": "^3.0.0"
 	},
 	"peerDependencies": {
 		"zod": "^3.0.0"
