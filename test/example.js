@@ -73,7 +73,7 @@ try {
 		tags: ["typespec", "api", "tutorial"],
 		metadata: { category: "tutorial", difficulty: "beginner" },
 		published: true,
-		createdAt: new Date(),
+		createdAt: new Date().toISOString(),
 	};
 	const _result = PostSchema.parse(validPost);
 	console.log("✓ Valid post created");
