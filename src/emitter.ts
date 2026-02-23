@@ -627,3 +627,20 @@ node_modules/
 .DS_Store
 `;
 }
+
+export const __test = {
+	containsTemplateParameter,
+	generateEnumSchema,
+	generateModelSchema,
+	generateModelTypeSchema,
+	generatePropertySchema,
+	generateScalarSchema,
+	generateTypeSchema,
+	generateUnionSchema,
+	generateZodSchemas,
+	getModelDependencies,
+	isTemplateDeclaration,
+	isValidJavaScriptIdentifier,
+	quotePropertyName,
+	topologicalSort,
+};
