@@ -300,10 +300,7 @@ describe("emitter helpers", () => {
 			type: stringScalar,
 			optional: true,
 		} as unknown as ModelProperty;
-		assert.equal(
-			__test.generatePropertySchema(prop),
-			"z.string().optional()",
-		);
+		assert.equal(__test.generatePropertySchema(prop), "z.string().optional()");
 	});
 
 	it("generates property schema without .optional() for required property", () => {
@@ -472,7 +469,11 @@ describe("emitter helpers", () => {
 				[
 					"b",
 					{
-						type: { kind: "Model", name: "B", indexer: undefined } as unknown as Type,
+						type: {
+							kind: "Model",
+							name: "B",
+							indexer: undefined,
+						} as unknown as Type,
 						optional: false,
 					} as unknown as ModelProperty,
 				],
@@ -486,7 +487,11 @@ describe("emitter helpers", () => {
 				[
 					"a",
 					{
-						type: { kind: "Model", name: "A", indexer: undefined } as unknown as Type,
+						type: {
+							kind: "Model",
+							name: "A",
+							indexer: undefined,
+						} as unknown as Type,
 						optional: false,
 					} as unknown as ModelProperty,
 				],
@@ -583,14 +588,8 @@ describe("emitter helpers", () => {
 	it("generates union schema with Model type variants", () => {
 		const union = {
 			variants: new Map([
-				[
-					"cat",
-					{ type: { kind: "Model", name: "Cat" } as unknown as Type },
-				],
-				[
-					"dog",
-					{ type: { kind: "Model", name: "Dog" } as unknown as Type },
-				],
+				["cat", { type: { kind: "Model", name: "Cat" } as unknown as Type }],
+				["dog", { type: { kind: "Model", name: "Dog" } as unknown as Type }],
 			]),
 		} as unknown as Union;
 
