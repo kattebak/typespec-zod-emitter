@@ -540,8 +540,14 @@ function generatePackageJson(
 				default: "./schemas.js",
 			},
 		},
+		scripts: {
+			prepare: "tsc",
+		},
 		peerDependencies: {
 			zod: "^3.0.0",
+		},
+		devDependencies: {
+			typescript: "^5.0.0",
 		},
 	};
 
