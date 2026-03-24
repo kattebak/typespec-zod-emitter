@@ -2,7 +2,7 @@ emit:
   - "@kattebak/typespec-zod-emitter"
 options:
   "@kattebak/typespec-zod-emitter":
-    output-file: "schemas.ts"
+    output-file: "schemas.js"
     emitter-output-dir: "{cwd}/build/zod-schemas"
     package-name: "@mycorp/zod-schemas"
     package-version: "0.0.1"

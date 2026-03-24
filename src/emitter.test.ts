@@ -179,6 +179,139 @@ describe("emitter helpers", () => {
 		);
 	});
 
+	it("generates enum declarations for .d.ts", () => {
+		const emptyEnum = {
+			name: "Empty",
+			members: new Map(),
+		} as unknown as Enum;
+
+		const mixedEnum = {
+			name: "Status",
+			members: new Map([
+				["Active", { name: "Active" }],
+				["Low", { name: "Low", value: "low" }],
+			]),
+		} as unknown as Enum;
+
+		assert.equal(
+			__test.generateEnumDeclaration(emptyEnum),
+			"export declare const EmptySchema: z.ZodNever;",
+		);
+		assert.equal(
+			__test.generateEnumDeclaration(mixedEnum),
+			'export declare const StatusSchema: z.ZodEnum<["Active", "low"]>;',
+		);
+	});
+
+	it("generates scalar type declarations for .d.ts", () => {
+		const stringScalar = { name: "string" } as unknown as Scalar;
+		const intScalar = { name: "int32" } as unknown as Scalar;
+		const boolScalar = { name: "boolean" } as unknown as Scalar;
+		const utcScalar = { name: "utcDateTime" } as unknown as Scalar;
+		const bytesScalar = { name: "bytes" } as unknown as Scalar;
+
+		assert.equal(
+			__test.generateScalarTypeDeclaration(stringScalar),
+			"z.ZodString",
+		);
+		assert.equal(
+			__test.generateScalarTypeDeclaration(intScalar),
+			"z.ZodNumber",
+		);
+		assert.equal(
+			__test.generateScalarTypeDeclaration(boolScalar),
+			"z.ZodBoolean",
+		);
+		assert.equal(
+			__test.generateScalarTypeDeclaration(utcScalar),
+			"z.ZodString",
+		);
+		assert.equal(
+			__test.generateScalarTypeDeclaration(bytesScalar),
+			"z.ZodType<Uint8Array>",
+		);
+	});
+
+	it("generates model declarations for .d.ts", () => {
+		const stringScalar = { kind: "Scalar", name: "string" } as Scalar;
+		const modelB: ModelLike = {
+			kind: "Model",
+			name: "B",
+			properties: new Map(),
+		} as ModelLike;
+
+		const modelA: ModelLike = {
+			kind: "Model",
+			name: "A",
+			properties: new Map([
+				[
+					"child",
+					{ type: modelB, optional: false } as unknown as ModelProperty,
+				],
+				[
+					"label",
+					{ type: stringScalar, optional: true } as unknown as ModelProperty,
+				],
+			]),
+		} as ModelLike;
+
+		const modelNameMap = new Map<Model, string>([
+			[modelA, "A"],
+			[modelB, "B"],
+		]);
+
+		const decl = __test.generateModelDeclaration(modelA, modelNameMap);
+		assert.equal(
+			decl.includes("export declare const ASchema: z.ZodObject<"),
+			true,
+		);
+		assert.equal(decl.includes("child: typeof BSchema"), true);
+		assert.equal(decl.includes("label: z.ZodOptional<z.ZodString>"), true);
+	});
+
+	it("generates full .d.ts declarations output", () => {
+		const stringScalar = { kind: "Scalar", name: "string" } as Scalar;
+		const modelA: ModelLike = {
+			kind: "Model",
+			name: "A",
+			properties: new Map([
+				[
+					"name",
+					{ type: stringScalar, optional: false } as unknown as ModelProperty,
+				],
+			]),
+		} as ModelLike;
+
+		const modelNameMap = new Map<Model, string>([[modelA, "A"]]);
+		const content = __test.generateZodDeclarations(
+			[modelA],
+			[],
+			"test-pkg",
+			"1.0.0",
+			modelNameMap,
+		);
+
+		assert.equal(content.includes('import type { z } from "zod";'), true);
+		assert.equal(content.includes("Package: test-pkg"), true);
+		assert.equal(content.includes("export declare const ASchema"), true);
+	});
+
+	it("generates union type declarations for .d.ts", () => {
+		const emptyUnion = { variants: new Map() } as unknown as Union;
+		const multiUnion = {
+			variants: new Map([
+				["a", { type: { kind: "String", value: "a" } }],
+				["b", { type: { kind: "String", value: "b" } }],
+			]),
+		} as unknown as Union;
+
+		assert.equal(__test.generateUnionTypeDeclaration(emptyUnion), "z.ZodNever");
+		assert.equal(
+			__test.generateUnionTypeDeclaration(multiUnion),
+			'z.ZodUnion<[z.ZodLiteral<"a">, z.ZodLiteral<"b">]>',
+		);
+	});
+
 	it("detects template declarations", () => {
 		const templateModel = {
 			kind: "Model",

@@ -11,7 +11,7 @@ export const $lib = {
 		additionalProperties: false,
 		properties: {
 			"output-dir": { type: "string", nullable: true },
-			"output-file": { type: "string", nullable: true, default: "schemas.ts" },
+			"output-file": { type: "string", nullable: true, default: "schemas.js" },
 			"package-name": { type: "string", nullable: true },
 			"package-version": { type: "string", nullable: true },
 		},

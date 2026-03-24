@@ -55,7 +55,7 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 	}
 
 	const outputDir = context.emitterOutputDir;
-	const outputFile = context.options["output-file"] ?? "schemas.ts";
+	const outputFile = context.options["output-file"] ?? "schemas.js";
 	const packageName = context.options["package-name"];
 	const packageVersion = context.options["package-version"];
 
@@ -72,6 +72,22 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 		content,
 	});
 
+	// Emit .d.ts alongside .js output
+	if (outputFile.endsWith(".js")) {
+		const dtsFile = outputFile.replace(/\.js$/, ".d.ts");
+		const dtsContent = generateZodDeclarations(
+			models,
+			enums,
+			packageName,
+			packageVersion,
+			modelNameMap,
+		);
+		await emitFile(context.program, {
+			path: resolvePath(outputDir, dtsFile),
+			content: dtsContent,
+		});
+	}
+
 	// Generate package.json if both package-name and package-version are provided
 	if (packageName && packageVersion) {
 		const packageJsonContent = generatePackageJson(packageName, packageVersion);
@@ -85,13 +101,6 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 		await emitFile(context.program, {
 			path: resolvePath(outputDir, "README.md"),
 			content: readmeContent,
-		});
-
-		// Generate tsconfig.json
-		const tsconfigContent = generateTsConfig();
-		await emitFile(context.program, {
-			path: resolvePath(outputDir, "tsconfig.json"),
-			content: tsconfigContent,
 		});
 
 		// Generate .npmignore
@@ -595,32 +604,8 @@ This package was generated using [@kattebak/typespec-zod-emitter](https://github
 `;
 }
 
-function generateTsConfig(): string {
-	const tsconfig = {
-		compilerOptions: {
-			target: "ES2020",
-			module: "ESNext",
-			moduleResolution: "bundler",
-			declaration: true,
-			declarationMap: true,
-			sourceMap: true,
-			outDir: ".",
-			rootDir: ".",
-			strict: true,
-			esModuleInterop: true,
-			skipLibCheck: true,
-			forceConsistentCasingInFileNames: true,
-		},
-		include: ["schemas.ts"],
-		exclude: ["node_modules"],
-	};
-
-	return `${JSON.stringify(tsconfig, null, 2)}\n`;
-}
-
 function generateNpmIgnore(): string {
-	return `tsconfig.json
-*.tsp
+	return `*.tsp
 tsp-output/
 node_modules/
 *.log
@@ -628,15 +613,238 @@ node_modules/
 `;
 }
 
+function generateZodDeclarations(
+	models: Model[],
+	enums: Enum[],
+	packageName?: string,
+	packageVersion?: string,
+	modelNameMap?: Map<Model, string>,
+): string {
+	const imports = 'import type { z } from "zod";\n\n';
+
+	let header = "";
+	if (packageName || packageVersion) {
+		header = "/**\n";
+		if (packageName) {
+			header += ` * Package: ${packageName}\n`;
+		}
+		if (packageVersion) {
+			header += ` * Version: ${packageVersion}\n`;
+		}
+		header += " */\n\n";
+	}
+
+	const sortedModels = topologicalSort(models, enums);
+
+	const enumDecls = enums
+		.map((enumType) => generateEnumDeclaration(enumType))
+		.join("\n\n");
+
+	const modelDecls = sortedModels
+		.map((model) => generateModelDeclaration(model, modelNameMap))
+		.join("\n\n");
+
+	return imports + header + (enumDecls ? `${enumDecls}\n\n` : "") + modelDecls;
+}
+
+function generateEnumDeclaration(enumType: Enum): string {
+	const members = Array.from(enumType.members.values());
+
+	if (members.length === 0) {
+		return `export declare const ${enumType.name}Schema: z.ZodNever;`;
+	}
+
+	const values = members.map((member) => {
+		const value = member.value ?? member.name;
+		return typeof value === "string" ? `"${value}"` : value;
+	});
+
+	return `export declare const ${enumType.name}Schema: z.ZodEnum<[${values.join(", ")}]>;`;
+}
+
+function generateModelDeclaration(
+	model: Model,
+	modelNameMap?: Map<Model, string>,
+): string {
+	const properties: string[] = [];
+
+	for (const [propName, prop] of model.properties) {
+		const zodType = generatePropertyTypeDeclaration(prop, modelNameMap);
+		const quotedName = quotePropertyName(propName);
+		properties.push(`\t${quotedName}: ${zodType}`);
+	}
+
+	const schemaBody =
+		properties.length > 0 ? `{\n${properties.join(",\n")}\n}` : "{}";
+
+	return `export declare const ${model.name}Schema: z.ZodObject<${schemaBody}>;`;
+}
+
+function generatePropertyTypeDeclaration(
+	prop: ModelProperty,
+	modelNameMap?: Map<Model, string>,
+): string {
+	let schema = generateTypeDeclaration(prop.type, modelNameMap);
+
+	if (prop.optional) {
+		schema = `z.ZodOptional<${schema}>`;
+	}
+
+	return schema;
+}
+
+function generateTypeDeclaration(
+	type: Type,
+	modelNameMap?: Map<Model, string>,
+): string {
+	switch (type.kind) {
+		case "Scalar":
+			return generateScalarTypeDeclaration(type);
+		case "Model":
+			return generateModelRefDeclaration(type, modelNameMap);
+		case "Enum":
+			return `typeof ${type.name}Schema`;
+		case "Union":
+			return generateUnionTypeDeclaration(type, modelNameMap);
+		case "String":
+			return `z.ZodLiteral<"${type.value}">`;
+		case "Number":
+			return `z.ZodLiteral<${type.value}>`;
+		case "Boolean":
+			return `z.ZodLiteral<${type.value}>`;
+		default:
+			return "z.ZodUnknown";
+	}
+}
+
+function generateScalarTypeDeclaration(scalar: Scalar): string {
+	let baseScalar = scalar;
+	while (baseScalar.baseScalar) {
+		baseScalar = baseScalar.baseScalar;
+	}
+
+	switch (baseScalar.name) {
+		case "string":
+			return "z.ZodString";
+		case "int32":
+		case "int64":
+		case "float":
+		case "float32":
+		case "float64":
+		case "decimal":
+		case "numeric":
+		case "integer":
+		case "safeint":
+		case "uint8":
+		case "uint16":
+		case "uint32":
+		case "uint64":
+		case "int8":
+		case "int16":
+			return "z.ZodNumber";
+		case "boolean":
+			return "z.ZodBoolean";
+		case "plainDate":
+		case "plainTime":
+		case "utcDateTime":
+		case "offsetDateTime":
+		case "duration":
+		case "url":
+			return "z.ZodString";
+		case "bytes":
+			return "z.ZodType<Uint8Array>";
+		default:
+			return "z.ZodUnknown";
+	}
+}
+
+function generateModelRefDeclaration(
+	model: Model,
+	modelNameMap?: Map<Model, string>,
+): string {
+	if (model.name === "Array" && model.indexer?.value) {
+		const elementType = model.indexer.value;
+		return `z.ZodArray<${generateTypeDeclaration(elementType, modelNameMap)}>`;
+	}
+
+	if (model.indexer && model.indexer.key.name === "string") {
+		const valueType = model.indexer.value;
+		return `z.ZodRecord<z.ZodString, ${generateTypeDeclaration(valueType, modelNameMap)}>`;
+	}
+
+	// Handle anonymous object literals
+	if (!model.name || model.name === "" || model.name === "object") {
+		const properties: string[] = [];
+		for (const [propName, prop] of model.properties) {
+			const zodType = generatePropertyTypeDeclaration(prop, modelNameMap);
+			const quotedName = quotePropertyName(propName);
+			properties.push(`${quotedName}: ${zodType}`);
+		}
+		const schemaBody =
+			properties.length > 0 ? `{ ${properties.join(", ")} }` : "{}";
+		return `z.ZodObject<${schemaBody}>`;
+	}
+
+	// Check if this model is in our declared models map
+	if (modelNameMap) {
+		const declaredName = modelNameMap.get(model);
+		if (declaredName) {
+			return `typeof ${declaredName}Schema`;
+		}
+
+		// Inline derived models
+		const properties: string[] = [];
+		for (const [propName, prop] of model.properties) {
+			const zodType = generatePropertyTypeDeclaration(prop, modelNameMap);
+			const quotedName = quotePropertyName(propName);
+			properties.push(`${quotedName}: ${zodType}`);
+		}
+		const schemaBody =
+			properties.length > 0 ? `{ ${properties.join(", ")} }` : "{}";
+		return `z.ZodObject<${schemaBody}>`;
+	}
+
+	return `typeof ${model.name}Schema`;
+}
+
+function generateUnionTypeDeclaration(
+	union: Union,
+	modelNameMap?: Map<Model, string>,
+): string {
+	const variants = Array.from(union.variants.values());
+
+	if (variants.length === 0) {
+		return "z.ZodNever";
+	}
+
+	if (variants.length === 1) {
+		return generateTypeDeclaration(variants[0].type, modelNameMap);
+	}
+
+	const schemas = variants.map((variant) =>
+		generateTypeDeclaration(variant.type, modelNameMap),
+	);
+
+	return `z.ZodUnion<[${schemas.join(", ")}]>`;
+}
+
 export const __test = {
 	containsTemplateParameter,
+	generateEnumDeclaration,
 	generateEnumSchema,
+	generateModelDeclaration,
 	generateModelSchema,
+	generateModelRefDeclaration,
 	generateModelTypeSchema,
 	generatePropertySchema,
+	generatePropertyTypeDeclaration,
 	generateScalarSchema,
+	generateScalarTypeDeclaration,
+	generateTypeDeclaration,
 	generateTypeSchema,
 	generateUnionSchema,
+	generateUnionTypeDeclaration,
+	generateZodDeclarations,
 	generateZodSchemas,
 	getModelDependencies,
 	isTemplateDeclaration,

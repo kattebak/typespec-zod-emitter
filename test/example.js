@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import * as Schemas from "../build/zod-schemas/schemas.ts";
+import * as Schemas from "../build/zod-schemas/schemas.js";
 
 describe("zod schema smoke tests", () => {
 	it("parses a valid user", () => {
