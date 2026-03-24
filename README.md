@@ -124,7 +124,7 @@ export const PostSchema = z.object({
   tags: z.array(z.string()),
   metadata: z.record(z.string(), z.string()),
   published: z.boolean(),
-  createdAt: z.date(),
+  createdAt: z.string().datetime(),
 });
 
 export const AddressSchema = z.object({
@@ -162,8 +162,14 @@ When both `package-name` and `package-version` are provided, a complete npm pack
       "default": "./schemas.js"
     }
   },
+  "scripts": {
+    "prepare": "tsc"
+  },
   "peerDependencies": {
     "zod": "^3.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
   }
 }
 ```
@@ -182,15 +188,14 @@ Configured to exclude source files and development artifacts from the published 
 
 ### 6. Building the Package
 
-To compile the TypeScript schemas to JavaScript:
+The generated package includes a `prepare` script that runs `tsc` automatically after `npm install`, so consumers get compiled output out of the box:
 
 ```bash
 cd tsp-output/@kattebak/typespec-zod-emitter
-npm install zod typescript
-npx tsc
+npm install
 ```
 
-This generates:
+This automatically generates:
 
 - `schemas.js` - Compiled JavaScript
 - `schemas.d.ts` - TypeScript declarations
@@ -223,7 +228,7 @@ const postData = {
   tags: ["intro", "hello"],
   metadata: { category: "blog" },
   published: true,
-  createdAt: new Date(),
+  createdAt: new Date().toISOString(),
 };
 
 const validatedPost = PostSchema.parse(postData);
@@ -253,8 +258,13 @@ type Post = z.infer<typeof PostSchema>;
 - `string` → `z.string()`
 - `int32`, `int64`, `float`, `number` → `z.number()`
 - `boolean` → `z.boolean()`
-- `utcDateTime`, `offsetDateTime`, `plainDate`, `plainTime` → `z.date()`
+- `utcDateTime` → `z.string().datetime()`
+- `offsetDateTime` → `z.string().datetime({ offset: true })`
+- `plainDate` → `z.string().date()`
+- `plainTime` → `z.string().time()`
+- `duration` → `z.string()`
 - `url` → `z.string().url()`
+- `bytes` → `z.instanceof(Uint8Array)`
 
 ### Complex Types
 
