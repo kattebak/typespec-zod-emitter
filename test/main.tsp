@@ -182,3 +182,41 @@ scalar httpsUrl extends url;
 model SecureLink {
   target: httpsUrl;
 }
+
+// Test base-model inheritance: a model that `extends` a base must emit ALL
+// inherited properties (base + own), with subclass properties overriding on
+// a name collision.
+model Animal {
+  animalId: string;
+  legs: int32;
+  status: string;
+}
+
+model Dog extends Animal {
+  breed: string;
+  // overrides the inherited `status` (string) with a narrower literal type
+  status: "goodBoy";
+}
+
+// Regression test: a model-typed property inherited from a base model must
+// still be tracked as a topological-sort dependency. `NestedBase` and
+// `NestedTarget` live in a namespace that is collected AFTER root-level
+// models, so `TopSub` (root-level, extends the namespaced base) is added to
+// the emitter's model list before `NestedTarget` is. If the dependency walk
+// only looked at `TopSub`'s own properties (missing the inherited `ref`
+// property), the topological sort would emit `TopSubSchema` before
+// `NestedTargetSchema`, producing a forward reference that throws at import
+// time.
+namespace OrderingRegression {
+  model NestedTarget {
+    label: string;
+  }
+
+  model NestedBase {
+    ref: NestedTarget;
+  }
+}
+
+model TopSub extends OrderingRegression.NestedBase {
+  ownField: string;
+}

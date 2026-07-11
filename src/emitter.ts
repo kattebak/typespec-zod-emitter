@@ -181,8 +181,10 @@ function getModelDependencies(model: Model): Set<string> {
 		}
 	}
 
-	// Extract dependencies from all properties
-	for (const [_, prop] of model.properties) {
+	// Extract dependencies from all properties, including those inherited
+	// from a base model — the emitted schema inlines inherited property
+	// references too, so the topological sort must see them.
+	for (const [_, prop] of getAllProperties(model)) {
 		extractDependencies(prop.type);
 	}
 
@@ -352,13 +354,26 @@ function quotePropertyName(name: string): string {
 	return isValidJavaScriptIdentifier(name) ? name : `"${name}"`;
 }
 
+function getAllProperties(model: Model): Map<string, ModelProperty> {
+	const props = new Map<string, ModelProperty>();
+	if (model.baseModel) {
+		for (const [name, prop] of getAllProperties(model.baseModel)) {
+			props.set(name, prop);
+		}
+	}
+	for (const [name, prop] of model.properties) {
+		props.set(name, prop);
+	}
+	return props;
+}
+
 function generateModelSchema(
 	model: Model,
 	modelNameMap?: Map<Model, string>,
 ): string {
 	const properties: string[] = [];
 
-	for (const [propName, prop] of model.properties) {
+	for (const [propName, prop] of getAllProperties(model)) {
 		const zodType = generatePropertySchema(prop, modelNameMap);
 		const quotedName = quotePropertyName(propName);
 		properties.push(`\t${quotedName}: ${zodType}`);
@@ -641,6 +656,7 @@ export const __test = {
 	generateTypeSchema,
 	generateUnionSchema,
 	generateZodSchemas,
+	getAllProperties,
 	getModelDependencies,
 	isTemplateDeclaration,
 	isValidJavaScriptIdentifier,

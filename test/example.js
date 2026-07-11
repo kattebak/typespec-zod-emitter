@@ -292,4 +292,41 @@ describe("zod schema smoke tests", () => {
 
 		assert.throws(() => Schemas.SecureLinkSchema.parse({ target: "nope" }));
 	});
+
+	it("emits inherited properties from a base model", () => {
+		const goodDog = {
+			animalId: "dog-1",
+			legs: 4,
+			status: "goodBoy",
+			breed: "Labrador",
+		};
+
+		// A `Dog extends Animal` schema must accept all inherited base properties.
+		const result = Schemas.DogSchema.parse(goodDog);
+		assert.equal(result.animalId, "dog-1");
+		assert.equal(result.breed, "Labrador");
+
+		// Dropping an inherited base property must fail validation, proving the
+		// inherited property survived into the generated schema.
+		const missingInherited = { status: "goodBoy", breed: "Labrador" };
+		assert.throws(() => Schemas.DogSchema.parse(missingInherited));
+
+		// The subclass override must win on a name collision: `status` is
+		// narrowed to the literal "goodBoy", so the base's plain string must
+		// be rejected.
+		const overridden = { ...goodDog, status: "anything" };
+		assert.throws(() => Schemas.DogSchema.parse(overridden));
+	});
+
+	it("tracks a model-typed property inherited from a base model as a dependency", () => {
+		// A successful import of the schemas module already proves the
+		// topological sort placed NestedTargetSchema before TopSubSchema
+		// (otherwise this file would fail to load with a ReferenceError).
+		const result = Schemas.TopSubSchema.parse({
+			ref: { label: "hello" },
+			ownField: "value",
+		});
+		assert.equal(result.ref.label, "hello");
+		assert.throws(() => Schemas.TopSubSchema.parse({ ownField: "value" }));
+	});
 });

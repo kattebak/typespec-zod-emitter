@@ -381,6 +381,58 @@ describe("emitter helpers", () => {
 		);
 	});
 
+	// === getAllProperties: base-model inheritance ===
+
+	it("collects inherited properties, subclass overriding on name collision", () => {
+		const stringScalar = { kind: "Scalar", name: "string" } as Scalar;
+		const intScalar = { kind: "Scalar", name: "int32" } as Scalar;
+		const literalStatus = { kind: "String", value: "goodBoy" } as Type;
+
+		const baseModel = {
+			kind: "Model",
+			name: "Animal",
+			properties: new Map([
+				[
+					"legs",
+					{ type: intScalar, optional: false } as unknown as ModelProperty,
+				],
+				[
+					"status",
+					{ type: stringScalar, optional: false } as unknown as ModelProperty,
+				],
+			]),
+		} as unknown as Model;
+
+		const model = {
+			kind: "Model",
+			name: "Dog",
+			baseModel,
+			properties: new Map([
+				[
+					"breed",
+					{ type: stringScalar, optional: false } as unknown as ModelProperty,
+				],
+				[
+					"status",
+					{ type: literalStatus, optional: false } as unknown as ModelProperty,
+				],
+			]),
+		} as unknown as Model;
+
+		const props = __test.getAllProperties(model);
+		assert.deepEqual(
+			[...props.keys()],
+			["legs", "status", "breed"],
+			"base properties come first, own properties appended/overridden in place",
+		);
+		assert.equal(props.get("status")?.type, literalStatus);
+
+		const result = __test.generateModelSchema(model);
+		assert.ok(result.includes("legs: z.number()"));
+		assert.ok(result.includes("breed: z.string()"));
+		assert.ok(result.includes('status: z.literal("goodBoy")'));
+	});
+
 	// === getModelDependencies ===
 
 	it("gets model dependencies including enum dependency", () => {
@@ -398,6 +450,41 @@ describe("emitter helpers", () => {
 
 		const deps = __test.getModelDependencies(model);
 		assert.ok(deps.has("Status"));
+	});
+
+	it("gets model dependencies inherited from a base model", () => {
+		const targetModel = { kind: "Model", name: "Target" } as unknown as Model;
+		const stringScalar = { kind: "Scalar", name: "string" } as Scalar;
+
+		const baseModel = {
+			kind: "Model",
+			name: "Base",
+			properties: new Map([
+				[
+					"ref",
+					{ type: targetModel, optional: false } as unknown as ModelProperty,
+				],
+			]),
+		} as unknown as Model;
+
+		const subModel = {
+			kind: "Model",
+			name: "Sub",
+			baseModel,
+			properties: new Map([
+				[
+					"ownField",
+					{ type: stringScalar, optional: false } as unknown as ModelProperty,
+				],
+			]),
+		} as unknown as Model;
+
+		// Sub's own properties don't reference Target directly — only the
+		// inherited `ref` property does. If getModelDependencies only walked
+		// model.properties, this dependency would be missed and the
+		// topological sort could emit Sub's schema before Target's.
+		const deps = __test.getModelDependencies(subModel);
+		assert.ok(deps.has("Target"));
 	});
 
 	it("gets model dependencies from union containing model refs", () => {
