@@ -4,6 +4,10 @@
 	"description": "TypeSpec emitter for Zod validators",
 	"type": "module",
 	"main": "dist/index.js",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/kattebak/typespec-zod-emitter.git"
+	},
 	"publishConfig": {
 		"access": "public"
 	},
