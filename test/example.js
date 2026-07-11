@@ -274,4 +274,29 @@ describe("zod schema smoke tests", () => {
 	it("does not emit generic template schemas", () => {
 		assert.equal("ResultListSchema" in Schemas, false);
 	});
+
+	it("emits inherited properties from a base model", () => {
+		const goodDog = {
+			animalId: "dog-1",
+			legs: 4,
+			status: "goodBoy",
+			breed: "Labrador",
+		};
+
+		// A `Dog extends Animal` schema must accept all inherited base properties.
+		const result = Schemas.DogSchema.parse(goodDog);
+		assert.equal(result.animalId, "dog-1");
+		assert.equal(result.breed, "Labrador");
+
+		// Dropping an inherited base property must fail validation, proving the
+		// inherited property survived into the generated schema.
+		const missingInherited = { status: "goodBoy", breed: "Labrador" };
+		assert.throws(() => Schemas.DogSchema.parse(missingInherited));
+
+		// The subclass override must win on a name collision: `status` is
+		// narrowed to the literal "goodBoy", so the base's plain string must
+		// be rejected.
+		const overridden = { ...goodDog, status: "anything" };
+		assert.throws(() => Schemas.DogSchema.parse(overridden));
+	});
 });

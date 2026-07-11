@@ -169,3 +169,18 @@ model ReservedWords {
   "function": string;
   normalProp: string;
 }
+
+// Test base-model inheritance: a model that `extends` a base must emit ALL
+// inherited properties (base + own), with subclass properties overriding on
+// a name collision.
+model Animal {
+  animalId: string;
+  legs: int32;
+  status: string;
+}
+
+model Dog extends Animal {
+  breed: string;
+  // overrides the inherited `status` (string) with a narrower literal type
+  status: "goodBoy";
+}
