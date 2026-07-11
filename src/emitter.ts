@@ -407,32 +407,32 @@ function generateTypeSchema(
 	}
 }
 
-const SCALAR_SCHEMA_MAP: Record<string, string> = {
-	string: "z.string()",
-	int32: "z.number()",
-	int64: "z.number()",
-	float: "z.number()",
-	float32: "z.number()",
-	float64: "z.number()",
-	decimal: "z.number()",
-	numeric: "z.number()",
-	integer: "z.number()",
-	safeint: "z.number()",
-	uint8: "z.number()",
-	uint16: "z.number()",
-	uint32: "z.number()",
-	uint64: "z.number()",
-	int8: "z.number()",
-	int16: "z.number()",
-	boolean: "z.boolean()",
-	plainDate: "z.string().date()",
-	plainTime: "z.string().time()",
-	utcDateTime: "z.string().datetime()",
-	offsetDateTime: "z.string().datetime({ offset: true })",
-	duration: "z.string()",
-	url: "z.string().url()",
-	bytes: "z.instanceof(Uint8Array)",
-};
+const SCALAR_SCHEMA_MAP = new Map<string, string>([
+	["string", "z.string()"],
+	["int32", "z.number()"],
+	["int64", "z.number()"],
+	["float", "z.number()"],
+	["float32", "z.number()"],
+	["float64", "z.number()"],
+	["decimal", "z.number()"],
+	["numeric", "z.number()"],
+	["integer", "z.number()"],
+	["safeint", "z.number()"],
+	["uint8", "z.number()"],
+	["uint16", "z.number()"],
+	["uint32", "z.number()"],
+	["uint64", "z.number()"],
+	["int8", "z.number()"],
+	["int16", "z.number()"],
+	["boolean", "z.boolean()"],
+	["plainDate", "z.string().date()"],
+	["plainTime", "z.string().time()"],
+	["utcDateTime", "z.string().datetime()"],
+	["offsetDateTime", "z.string().datetime({ offset: true })"],
+	["duration", "z.string()"],
+	["url", "z.string().url()"],
+	["bytes", "z.instanceof(Uint8Array)"],
+]);
 
 function generateScalarSchema(scalar: Scalar): string {
 	// Walk from the current scalar UP to the root, returning the first
@@ -440,7 +440,7 @@ function generateScalarSchema(scalar: Scalar): string {
 	// `string`) before they get walked past to their primitive root.
 	let current: Scalar | undefined = scalar;
 	while (current) {
-		const mapped = SCALAR_SCHEMA_MAP[current.name];
+		const mapped = SCALAR_SCHEMA_MAP.get(current.name);
 		if (mapped) {
 			return mapped;
 		}

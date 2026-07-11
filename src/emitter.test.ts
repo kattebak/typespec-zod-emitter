@@ -261,6 +261,11 @@ describe("emitter helpers", () => {
 		assert.equal(__test.generateScalarSchema(scalar), "z.unknown()");
 	});
 
+	it("does not resolve inherited Object.prototype members as a scalar mapping", () => {
+		const scalar = { name: "toString" } as unknown as Scalar;
+		assert.equal(__test.generateScalarSchema(scalar), "z.unknown()");
+	});
+
 	it("generates scalar schema following baseScalar traversal", () => {
 		const baseScalar = { name: "string" } as unknown as Scalar;
 		const derivedScalar = {
