@@ -261,6 +261,11 @@ describe("emitter helpers", () => {
 		assert.equal(__test.generateScalarSchema(scalar), "z.unknown()");
 	});
 
+	it("does not resolve inherited Object.prototype members as a scalar mapping", () => {
+		const scalar = { name: "toString" } as unknown as Scalar;
+		assert.equal(__test.generateScalarSchema(scalar), "z.unknown()");
+	});
+
 	it("generates scalar schema following baseScalar traversal", () => {
 		const baseScalar = { name: "string" } as unknown as Scalar;
 		const derivedScalar = {
@@ -268,6 +273,31 @@ describe("emitter helpers", () => {
 			baseScalar,
 		} as unknown as Scalar;
 		assert.equal(__test.generateScalarSchema(derivedScalar), "z.string()");
+	});
+
+	it("matches a refined scalar before walking past it to its primitive root", () => {
+		const stringScalar = { name: "string" } as unknown as Scalar;
+		const urlScalar = {
+			name: "url",
+			baseScalar: stringScalar,
+		} as unknown as Scalar;
+		assert.equal(__test.generateScalarSchema(urlScalar), "z.string().url()");
+	});
+
+	it("resolves a user-defined scalar to the nearest known ancestor", () => {
+		const stringScalar = { name: "string" } as unknown as Scalar;
+		const urlScalar = {
+			name: "url",
+			baseScalar: stringScalar,
+		} as unknown as Scalar;
+		const httpsUrlScalar = {
+			name: "httpsUrl",
+			baseScalar: urlScalar,
+		} as unknown as Scalar;
+		assert.equal(
+			__test.generateScalarSchema(httpsUrlScalar),
+			"z.string().url()",
+		);
 	});
 
 	// === generateTypeSchema: additional type kinds ===

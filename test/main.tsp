@@ -170,6 +170,19 @@ model ReservedWords {
   normalProp: string;
 }
 
+// Test url scalar — must emit z.string().url(), not z.string()
+model Website {
+  homepage: url;
+  feed?: url;
+}
+
+// Test derived scalar that extends url — must still emit z.string().url()
+scalar httpsUrl extends url;
+
+model SecureLink {
+  target: httpsUrl;
+}
+
 // Test base-model inheritance: a model that `extends` a base must emit ALL
 // inherited properties (base + own), with subclass properties overriding on
 // a name collision.

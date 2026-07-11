@@ -275,6 +275,24 @@ describe("zod schema smoke tests", () => {
 		assert.equal("ResultListSchema" in Schemas, false);
 	});
 
+	it("enforces URL shape for the url scalar", () => {
+		const valid = Schemas.WebsiteSchema.parse({
+			homepage: "https://example.com",
+		});
+		assert.equal(valid.homepage, "https://example.com");
+
+		assert.throws(() => Schemas.WebsiteSchema.parse({ homepage: "not-a-url" }));
+	});
+
+	it("enforces URL shape for a derived scalar that extends url", () => {
+		const valid = Schemas.SecureLinkSchema.parse({
+			target: "https://example.com/x",
+		});
+		assert.equal(valid.target, "https://example.com/x");
+
+		assert.throws(() => Schemas.SecureLinkSchema.parse({ target: "nope" }));
+	});
+
 	it("emits inherited properties from a base model", () => {
 		const goodDog = {
 			animalId: "dog-1",
