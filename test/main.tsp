@@ -169,3 +169,16 @@ model ReservedWords {
   "function": string;
   normalProp: string;
 }
+
+// Test url scalar — must emit z.string().url(), not z.string()
+model Website {
+  homepage: url;
+  feed?: url;
+}
+
+// Test derived scalar that extends url — must still emit z.string().url()
+scalar httpsUrl extends url;
+
+model SecureLink {
+  target: httpsUrl;
+}

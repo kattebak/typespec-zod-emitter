@@ -407,50 +407,47 @@ function generateTypeSchema(
 	}
 }
 
+const SCALAR_SCHEMA_MAP = new Map<string, string>([
+	["string", "z.string()"],
+	["int32", "z.number()"],
+	["int64", "z.number()"],
+	["float", "z.number()"],
+	["float32", "z.number()"],
+	["float64", "z.number()"],
+	["decimal", "z.number()"],
+	["numeric", "z.number()"],
+	["integer", "z.number()"],
+	["safeint", "z.number()"],
+	["uint8", "z.number()"],
+	["uint16", "z.number()"],
+	["uint32", "z.number()"],
+	["uint64", "z.number()"],
+	["int8", "z.number()"],
+	["int16", "z.number()"],
+	["boolean", "z.boolean()"],
+	["plainDate", "z.string().date()"],
+	["plainTime", "z.string().time()"],
+	["utcDateTime", "z.string().datetime()"],
+	["offsetDateTime", "z.string().datetime({ offset: true })"],
+	["duration", "z.string()"],
+	["url", "z.string().url()"],
+	["bytes", "z.instanceof(Uint8Array)"],
+]);
+
 function generateScalarSchema(scalar: Scalar): string {
-	let baseScalar = scalar;
-	while (baseScalar.baseScalar) {
-		baseScalar = baseScalar.baseScalar;
+	// Walk from the current scalar UP to the root, returning the first
+	// known mapping. This matches refined scalars (e.g. `url`, which extends
+	// `string`) before they get walked past to their primitive root.
+	let current: Scalar | undefined = scalar;
+	while (current) {
+		const mapped = SCALAR_SCHEMA_MAP.get(current.name);
+		if (mapped) {
+			return mapped;
+		}
+		current = current.baseScalar;
 	}
 
-	switch (baseScalar.name) {
-		case "string":
-			return "z.string()";
-		case "int32":
-		case "int64":
-		case "float":
-		case "float32":
-		case "float64":
-		case "decimal":
-		case "numeric":
-		case "integer":
-		case "safeint":
-		case "uint8":
-		case "uint16":
-		case "uint32":
-		case "uint64":
-		case "int8":
-		case "int16":
-			return "z.number()";
-		case "boolean":
-			return "z.boolean()";
-		case "plainDate":
-			return "z.string().date()";
-		case "plainTime":
-			return "z.string().time()";
-		case "utcDateTime":
-			return "z.string().datetime()";
-		case "offsetDateTime":
-			return "z.string().datetime({ offset: true })";
-		case "duration":
-			return "z.string()";
-		case "url":
-			return "z.string().url()";
-		case "bytes":
-			return "z.instanceof(Uint8Array)";
-		default:
-			return "z.unknown()";
-	}
+	return "z.unknown()";
 }
 
 function generateModelTypeSchema(
