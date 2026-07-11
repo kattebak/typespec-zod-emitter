@@ -270,6 +270,31 @@ describe("emitter helpers", () => {
 		assert.equal(__test.generateScalarSchema(derivedScalar), "z.string()");
 	});
 
+	it("matches a refined scalar before walking past it to its primitive root", () => {
+		const stringScalar = { name: "string" } as unknown as Scalar;
+		const urlScalar = {
+			name: "url",
+			baseScalar: stringScalar,
+		} as unknown as Scalar;
+		assert.equal(__test.generateScalarSchema(urlScalar), "z.string().url()");
+	});
+
+	it("resolves a user-defined scalar to the nearest known ancestor", () => {
+		const stringScalar = { name: "string" } as unknown as Scalar;
+		const urlScalar = {
+			name: "url",
+			baseScalar: stringScalar,
+		} as unknown as Scalar;
+		const httpsUrlScalar = {
+			name: "httpsUrl",
+			baseScalar: urlScalar,
+		} as unknown as Scalar;
+		assert.equal(
+			__test.generateScalarSchema(httpsUrlScalar),
+			"z.string().url()",
+		);
+	});
+
 	// === generateTypeSchema: additional type kinds ===
 
 	it("generates type schema for Enum reference", () => {
