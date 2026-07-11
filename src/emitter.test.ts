@@ -422,6 +422,41 @@ describe("emitter helpers", () => {
 		assert.ok(deps.has("Status"));
 	});
 
+	it("gets model dependencies inherited from a base model", () => {
+		const targetModel = { kind: "Model", name: "Target" } as unknown as Model;
+		const stringScalar = { kind: "Scalar", name: "string" } as Scalar;
+
+		const baseModel = {
+			kind: "Model",
+			name: "Base",
+			properties: new Map([
+				[
+					"ref",
+					{ type: targetModel, optional: false } as unknown as ModelProperty,
+				],
+			]),
+		} as unknown as Model;
+
+		const subModel = {
+			kind: "Model",
+			name: "Sub",
+			baseModel,
+			properties: new Map([
+				[
+					"ownField",
+					{ type: stringScalar, optional: false } as unknown as ModelProperty,
+				],
+			]),
+		} as unknown as Model;
+
+		// Sub's own properties don't reference Target directly — only the
+		// inherited `ref` property does. If getModelDependencies only walked
+		// model.properties, this dependency would be missed and the
+		// topological sort could emit Sub's schema before Target's.
+		const deps = __test.getModelDependencies(subModel);
+		assert.ok(deps.has("Target"));
+	});
+
 	it("gets model dependencies from union containing model refs", () => {
 		const modelRef = {
 			kind: "Model",

@@ -299,4 +299,16 @@ describe("zod schema smoke tests", () => {
 		const overridden = { ...goodDog, status: "anything" };
 		assert.throws(() => Schemas.DogSchema.parse(overridden));
 	});
+
+	it("tracks a model-typed property inherited from a base model as a dependency", () => {
+		// A successful import of the schemas module already proves the
+		// topological sort placed NestedTargetSchema before TopSubSchema
+		// (otherwise this file would fail to load with a ReferenceError).
+		const result = Schemas.TopSubSchema.parse({
+			ref: { label: "hello" },
+			ownField: "value",
+		});
+		assert.equal(result.ref.label, "hello");
+		assert.throws(() => Schemas.TopSubSchema.parse({ ownField: "value" }));
+	});
 });

@@ -181,8 +181,10 @@ function getModelDependencies(model: Model): Set<string> {
 		}
 	}
 
-	// Extract dependencies from all properties
-	for (const [_, prop] of model.properties) {
+	// Extract dependencies from all properties, including those inherited
+	// from a base model — the emitted schema inlines inherited property
+	// references too, so the topological sort must see them.
+	for (const [_, prop] of getAllProperties(model)) {
 		extractDependencies(prop.type);
 	}
 
