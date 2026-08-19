@@ -823,4 +823,32 @@ describe("emitter helpers", () => {
 			"z.union([z.literal(7), z.literal(false)])",
 		);
 	});
+
+	it("generates union schema with a null variant", () => {
+		const union = {
+			variants: new Map([
+				["cat", { type: { kind: "Model", name: "Cat" } as unknown as Type }],
+				[
+					"none",
+					{ type: { kind: "Intrinsic", name: "null" } as unknown as Type },
+				],
+			]),
+		} as unknown as Union;
+
+		// z.unknown() here would widen the union to accept every value.
+		assert.equal(
+			__test.generateUnionSchema(union),
+			"z.union([CatSchema, z.null()])",
+		);
+	});
+
+	it("maps intrinsic types to their zod equivalents", () => {
+		const intrinsic = (name: string) =>
+			__test.generateTypeSchema({ kind: "Intrinsic", name } as unknown as Type);
+
+		assert.equal(intrinsic("null"), "z.null()");
+		assert.equal(intrinsic("never"), "z.never()");
+		assert.equal(intrinsic("void"), "z.void()");
+		assert.equal(intrinsic("unknown"), "z.unknown()");
+	});
 });

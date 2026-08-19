@@ -482,10 +482,20 @@ function generateTypeSchema(
 			return `z.literal(${type.value})`;
 		case "Boolean":
 			return `z.literal(${type.value})`;
+		case "Intrinsic":
+			return INTRINSIC_SCHEMA_MAP.get(type.name) ?? "z.unknown()";
 		default:
 			return "z.unknown()";
 	}
 }
+
+// Without these, a `null` variant falls through to z.unknown() and the union
+// it sits in accepts every value.
+const INTRINSIC_SCHEMA_MAP = new Map<string, string>([
+	["null", "z.null()"],
+	["never", "z.never()"],
+	["void", "z.void()"],
+]);
 
 const SCALAR_SCHEMA_MAP = new Map<string, string>([
 	["string", "z.string()"],
