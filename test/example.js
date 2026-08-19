@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
+import {
+	createValidationMiddleware,
+	findOperation,
+	operations,
+	validationMiddleware,
+} from "../build/zod-schemas/middleware.js";
 import * as Schemas from "../build/zod-schemas/schemas.ts";
 
 describe("zod schema smoke tests", () => {
@@ -328,5 +333,130 @@ describe("zod schema smoke tests", () => {
 		});
 		assert.equal(result.ref.label, "hello");
 		assert.throws(() => Schemas.TopSubSchema.parse({ ownField: "value" }));
+	});
+});
+
+const BASE_PATH = "https://api.example.com/v1";
+
+function request(method, path, body) {
+	return {
+		url: `${BASE_PATH}${path}`,
+		init: {
+			method,
+			headers: { "Content-Type": "application/json" },
+			body: body === undefined ? undefined : JSON.stringify(body),
+		},
+	};
+}
+
+describe("request validation middleware smoke tests", () => {
+	it("maps every operation to a method and a path matcher", () => {
+		const create = findOperation("POST", `${BASE_PATH}/widgets`);
+		const update = findOperation("PATCH", `${BASE_PATH}/widgets/widget-1`);
+		const list = findOperation("get", `${BASE_PATH}/widgets?status=Active`);
+
+		assert.equal(operations.length, 6);
+		assert.equal(create.operationId, "Widgets_create");
+		assert.equal(update.operationId, "Widgets_update");
+		assert.equal(list.operationId, "Widgets_list");
+		assert.equal(findOperation("POST", `${BASE_PATH}/gadgets`), undefined);
+		assert.equal(
+			list.parameters.query.parse({ status: "Active" }).status,
+			"Active",
+		);
+		assert.deepEqual(update.pathParameterNames, ["widgetId"]);
+	});
+
+	it("omits read-only properties from the create body schema", () => {
+		const create = findOperation("POST", `${BASE_PATH}/widgets`);
+
+		assert.equal(
+			"widgetId" in
+				create.body.parse({
+					widgetId: "widget-1",
+					name: "Widget",
+					quantity: 1,
+				}),
+			false,
+		);
+	});
+
+	it("passes a valid body through untouched", async () => {
+		const context = request("POST", "/widgets", {
+			name: "Widget",
+			quantity: 2,
+		});
+		const body = context.init.body;
+
+		assert.equal(await validationMiddleware.pre(context), undefined);
+		assert.equal(context.init.body, body);
+	});
+
+	it("rejects an invalid body before the request is sent", async () => {
+		const context = request("POST", "/widgets", { name: "Widget" });
+
+		await assert.rejects(
+			() => validationMiddleware.pre(context),
+			(error) => {
+				assert.equal(error.name, "RequestValidationError");
+				assert.equal(error.operationId, "Widgets_create");
+				assert.equal(
+					error.issues.some((issue) => issue.path.join(".") === "quantity"),
+					true,
+				);
+				assert.equal(error.error.issues.length, error.issues.length);
+				return true;
+			},
+		);
+	});
+
+	it("rejects a body that is not valid json", async () => {
+		const context = request("POST", "/widgets");
+		context.init.body = "not json";
+
+		await assert.rejects(() => validationMiddleware.pre(context), {
+			name: "RequestValidationError",
+		});
+	});
+
+	it("validates a body that references a named schema", async () => {
+		const valid = request("POST", "/widgets/products", {
+			name: "Widget",
+			price: 9.99,
+			inStock: true,
+			attributes: [{ key: "color", value: "red" }],
+		});
+		const invalid = request("POST", "/widgets/products", {
+			name: "Widget",
+			price: "free",
+			inStock: true,
+			attributes: [],
+		});
+
+		assert.equal(await validationMiddleware.pre(valid), undefined);
+		await assert.rejects(() => validationMiddleware.pre(invalid), {
+			name: "RequestValidationError",
+		});
+	});
+
+	it("ignores requests it has no schema for", async () => {
+		const unmapped = request("POST", "/gadgets", { name: 1 });
+		const withoutBody = request("GET", "/widgets");
+		const nonJson = request("POST", "/widgets", { name: "Widget" });
+		nonJson.init.headers = { "Content-Type": "text/plain" };
+
+		assert.equal(await validationMiddleware.pre(unmapped), undefined);
+		assert.equal(await validationMiddleware.pre(withoutBody), undefined);
+		assert.equal(await validationMiddleware.pre(nonJson), undefined);
+	});
+
+	it("skips validation when the opt-out flag is set", async () => {
+		const context = request("POST", "/widgets", { name: "Widget" });
+
+		assert.equal(
+			await createValidationMiddleware({ validate: false }).pre(context),
+			undefined,
+		);
+		await assert.rejects(() => createValidationMiddleware().pre(context));
 	});
 });
