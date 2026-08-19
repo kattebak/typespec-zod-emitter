@@ -8,6 +8,17 @@ import {
 } from "../build/zod-schemas/middleware.js";
 import * as Schemas from "../build/zod-schemas/schemas.ts";
 
+const validConstrained = {
+	id: "0123456789012345678901234",
+	externalId: crypto.randomUUID(),
+	nickname: "ada",
+	reference: "AB-1234",
+	contact: "ada@example.com",
+	homepage: "https://example.com",
+	rating: 4,
+	price: 19.99,
+};
+
 describe("zod schema smoke tests", () => {
 	it("parses a valid user", () => {
 		const validUser = {
@@ -323,6 +334,93 @@ describe("zod schema smoke tests", () => {
 		assert.throws(() => Schemas.DogSchema.parse(overridden));
 	});
 
+	it("enforces scalar-level length constraints on every property using the scalar", () => {
+		const tooLong = { ...validConstrained, id: crypto.randomUUID() };
+		assert.equal(tooLong.id.length, 36);
+		assert.throws(() => Schemas.ConstrainedSchema.parse(tooLong));
+
+		assert.throws(() =>
+			Schemas.ConstrainedSchema.parse({ ...validConstrained, id: "short" }),
+		);
+		assert.equal(
+			Schemas.ConstrainedSchema.parse(validConstrained).id,
+			validConstrained.id,
+		);
+	});
+
+	it("enforces property-level length constraints", () => {
+		assert.throws(() =>
+			Schemas.ConstrainedSchema.parse({ ...validConstrained, nickname: "a" }),
+		);
+		assert.throws(() =>
+			Schemas.ConstrainedSchema.parse({
+				...validConstrained,
+				nickname: "nine char",
+			}),
+		);
+		assert.throws(() =>
+			Schemas.ConstrainedSchema.parse({ ...validConstrained, code: "toolong" }),
+		);
+	});
+
+	it("enforces the pattern as a regex", () => {
+		assert.throws(() =>
+			Schemas.ConstrainedSchema.parse({
+				...validConstrained,
+				reference: "ab-1234",
+			}),
+		);
+		assert.throws(() =>
+			Schemas.ConstrainedSchema.parse({
+				...validConstrained,
+				reference: "AB-12",
+			}),
+		);
+	});
+
+	it("maps formats to zod natives", () => {
+		assert.throws(() =>
+			Schemas.ConstrainedSchema.parse({
+				...validConstrained,
+				externalId: "not-a-uuid",
+			}),
+		);
+		assert.throws(() =>
+			Schemas.ConstrainedSchema.parse({
+				...validConstrained,
+				contact: "not-an-email",
+			}),
+		);
+		assert.throws(() =>
+			Schemas.ConstrainedSchema.parse({
+				...validConstrained,
+				homepage: "not-a-url",
+			}),
+		);
+	});
+
+	it("enforces numeric value bounds", () => {
+		assert.throws(() =>
+			Schemas.ConstrainedSchema.parse({ ...validConstrained, rating: 0 }),
+		);
+		assert.throws(() =>
+			Schemas.ConstrainedSchema.parse({ ...validConstrained, rating: 6 }),
+		);
+		assert.throws(() =>
+			Schemas.ConstrainedSchema.parse({ ...validConstrained, price: -1 }),
+		);
+	});
+
+	it("lets a property narrow the constraints of its scalar type", () => {
+		const result = Schemas.NarrowedPropertySchema.parse({ label: "abcdef" });
+		assert.equal(result.label, "abcdef");
+
+		assert.throws(() => Schemas.NarrowedPropertySchema.parse({ label: "abc" }));
+		assert.throws(() =>
+			Schemas.NarrowedPropertySchema.parse({ label: "abcdefghijk" }),
+		);
+	});
+
 	it("tracks a model-typed property inherited from a base model as a dependency", () => {
 		// A successful import of the schemas module already proves the
 		// topological sort placed NestedTargetSchema before TopSubSchema
@@ -355,7 +453,7 @@ describe("request validation middleware smoke tests", () => {
 		const update = findOperation("PATCH", `${BASE_PATH}/widgets/widget-1`);
 		const list = findOperation("get", `${BASE_PATH}/widgets?status=Active`);
 
-		assert.equal(operations.length, 6);
+		assert.equal(operations.length, 7);
 		assert.equal(create.operationId, "Widgets_create");
 		assert.equal(update.operationId, "Widgets_update");
 		assert.equal(list.operationId, "Widgets_list");
@@ -435,6 +533,35 @@ describe("request validation middleware smoke tests", () => {
 
 		assert.equal(await validationMiddleware.pre(valid), undefined);
 		await assert.rejects(() => validationMiddleware.pre(invalid), {
+			name: "RequestValidationError",
+		});
+	});
+
+	it("rejects a body that violates a constraint before the request is sent", async () => {
+		const valid = request("POST", "/widgets/constrained", validConstrained);
+		const tooLongId = request("POST", "/widgets/constrained", {
+			...validConstrained,
+			id: crypto.randomUUID(),
+		});
+		const outOfRange = request("POST", "/widgets/constrained", {
+			...validConstrained,
+			rating: 9,
+		});
+
+		assert.equal(await validationMiddleware.pre(valid), undefined);
+		await assert.rejects(
+			() => validationMiddleware.pre(tooLongId),
+			(error) => {
+				assert.equal(error.name, "RequestValidationError");
+				assert.equal(error.operationId, "Widgets_createConstrained");
+				assert.equal(
+					error.issues.some((issue) => issue.path.join(".") === "id"),
+					true,
+				);
+				return true;
+			},
+		);
+		await assert.rejects(() => validationMiddleware.pre(outOfRange), {
 			name: "RequestValidationError",
 		});
 	});

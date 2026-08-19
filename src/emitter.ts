@@ -2,9 +2,16 @@ import type { EmitContext } from "@typespec/compiler";
 import {
 	type Enum,
 	emitFile,
+	getFormat,
+	getMaxLength,
+	getMaxValue,
+	getMinLength,
+	getMinValue,
+	getPattern,
 	type Model,
 	type ModelProperty,
 	type Namespace,
+	type Program,
 	resolvePath,
 	type Scalar,
 	type Type,
@@ -66,6 +73,7 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 		packageName,
 		packageVersion,
 		modelNameMap,
+		context.program,
 	);
 
 	await emitFile(context.program, {
@@ -80,9 +88,10 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 			: generateMiddleware(
 					context.program,
 					{
-						type: (type) => generateTypeSchema(type, modelNameMap),
+						type: (type) =>
+							generateTypeSchema(type, modelNameMap, context.program),
 						property: (property) =>
-							generatePropertySchema(property, modelNameMap),
+							generatePropertySchema(property, modelNameMap, context.program),
 						propertyName: quotePropertyName,
 						properties: getAllProperties,
 					},
@@ -288,6 +297,7 @@ function generateZodSchemas(
 	packageName?: string,
 	packageVersion?: string,
 	modelNameMap?: Map<Model, string>,
+	program?: Program,
 ): string {
 	const imports = 'import { z } from "zod";\n\n';
 
@@ -311,7 +321,7 @@ function generateZodSchemas(
 		.join("\n\n");
 
 	const modelSchemas = sortedModels
-		.map((model) => generateModelSchema(model, modelNameMap))
+		.map((model) => generateModelSchema(model, modelNameMap, program))
 		.join("\n\n");
 
 	return (
@@ -412,11 +422,12 @@ function getAllProperties(model: Model): Map<string, ModelProperty> {
 function generateModelSchema(
 	model: Model,
 	modelNameMap?: Map<Model, string>,
+	program?: Program,
 ): string {
 	const properties: string[] = [];
 
 	for (const [propName, prop] of getAllProperties(model)) {
-		const zodType = generatePropertySchema(prop, modelNameMap);
+		const zodType = generatePropertySchema(prop, modelNameMap, program);
 		const quotedName = quotePropertyName(propName);
 		properties.push(`\t${quotedName}: ${zodType}`);
 	}
@@ -430,8 +441,14 @@ function generateModelSchema(
 function generatePropertySchema(
 	prop: ModelProperty,
 	modelNameMap?: Map<Model, string>,
+	program?: Program,
 ): string {
-	let schema = generateTypeSchema(prop.type, modelNameMap);
+	// A property may narrow the constraints of its own scalar type, so the
+	// property itself is the last constraint source in the chain.
+	let schema =
+		prop.type.kind === "Scalar"
+			? generateScalarSchema(prop.type, program, prop)
+			: generateTypeSchema(prop.type, modelNameMap, program);
 
 	if (prop.optional) {
 		schema += ".optional()";
@@ -443,16 +460,17 @@ function generatePropertySchema(
 function generateTypeSchema(
 	type: Type,
 	modelNameMap?: Map<Model, string>,
+	program?: Program,
 ): string {
 	switch (type.kind) {
 		case "Scalar":
-			return generateScalarSchema(type);
+			return generateScalarSchema(type, program);
 		case "Model":
-			return generateModelTypeSchema(type, modelNameMap);
+			return generateModelTypeSchema(type, modelNameMap, program);
 		case "Enum":
 			return `${type.name}Schema`;
 		case "Union":
-			return generateUnionSchema(type, modelNameMap);
+			return generateUnionSchema(type, modelNameMap, program);
 		case "String":
 			return `z.literal("${type.value}")`;
 		case "Number":
@@ -491,7 +509,119 @@ const SCALAR_SCHEMA_MAP = new Map<string, string>([
 	["bytes", "z.instanceof(Uint8Array)"],
 ]);
 
-function generateScalarSchema(scalar: Scalar): string {
+const FORMAT_CHECK_MAP = new Map<string, string>([
+	["uuid", ".uuid()"],
+	["url", ".url()"],
+	["uri", ".url()"],
+	["email", ".email()"],
+]);
+
+interface Constraints {
+	minLength?: number;
+	maxLength?: number;
+	pattern?: string;
+	format?: string;
+	minValue?: number;
+	maxValue?: number;
+}
+
+function readConstraints(program: Program, target: Type): Constraints {
+	return {
+		minLength: getMinLength(program, target),
+		maxLength: getMaxLength(program, target),
+		pattern: getPattern(program, target),
+		format: getFormat(program, target),
+		minValue: getMinValue(program, target),
+		maxValue: getMaxValue(program, target),
+	};
+}
+
+function mergeConstraints(base: Constraints, refinement: Constraints) {
+	return {
+		minLength: refinement.minLength ?? base.minLength,
+		maxLength: refinement.maxLength ?? base.maxLength,
+		pattern: refinement.pattern ?? base.pattern,
+		format: refinement.format ?? base.format,
+		minValue: refinement.minValue ?? base.minValue,
+		maxValue: refinement.maxValue ?? base.maxValue,
+	};
+}
+
+function collectConstraints(
+	program: Program,
+	scalar: Scalar,
+	property?: ModelProperty,
+): Constraints {
+	// Root scalar first, so each refinement overrides the one it extends and
+	// the property (if any) has the final say.
+	const sources: Type[] = [];
+	for (
+		let current: Scalar | undefined = scalar;
+		current;
+		current = current.baseScalar
+	) {
+		sources.unshift(current);
+	}
+	if (property) {
+		sources.push(property);
+	}
+
+	return sources.reduce<Constraints>(
+		(merged, source) =>
+			mergeConstraints(merged, readConstraints(program, source)),
+		{},
+	);
+}
+
+function toRegexLiteral(pattern: string): string {
+	if (/[\n\r\u2028\u2029]/.test(pattern)) {
+		return `new RegExp(${JSON.stringify(pattern)})`;
+	}
+
+	const escaped = pattern.replace(/\\.|\//g, (match) =>
+		match === "/" ? "\\/" : match,
+	);
+	return `/${escaped}/`;
+}
+
+function applyConstraints(schema: string, constraints: Constraints): string {
+	const checks: string[] = [];
+
+	if (schema.startsWith("z.string()")) {
+		const formatCheck = constraints.format
+			? FORMAT_CHECK_MAP.get(constraints.format.toLowerCase())
+			: undefined;
+		if (formatCheck && !schema.includes(formatCheck)) {
+			checks.push(formatCheck);
+		}
+		if (constraints.pattern !== undefined) {
+			checks.push(`.regex(${toRegexLiteral(constraints.pattern)})`);
+		}
+		if (constraints.minLength !== undefined) {
+			checks.push(`.min(${constraints.minLength})`);
+		}
+		if (constraints.maxLength !== undefined) {
+			checks.push(`.max(${constraints.maxLength})`);
+		}
+	}
+
+	if (schema.startsWith("z.number()")) {
+		if (constraints.minValue !== undefined) {
+			checks.push(`.min(${constraints.minValue})`);
+		}
+		if (constraints.maxValue !== undefined) {
+			checks.push(`.max(${constraints.maxValue})`);
+		}
+	}
+
+	return schema + checks.join("");
+}
+
+function generateScalarSchema(
+	scalar: Scalar,
+	program?: Program,
+	property?: ModelProperty,
+): string {
 	// Walk from the current scalar UP to the root, returning the first
 	// known mapping. This matches refined scalars (e.g. `url`, which extends
 	// `string`) before they get walked past to their primitive root.
@@ -499,7 +629,13 @@ function generateScalarSchema(scalar: Scalar): string {
 	while (current) {
 		const mapped = SCALAR_SCHEMA_MAP.get(current.name);
 		if (mapped) {
-			return mapped;
+			if (!program) {
+				return mapped;
+			}
+			return applyConstraints(
+				mapped,
+				collectConstraints(program, scalar, property),
+			);
 		}
 		current = current.baseScalar;
 	}
@@ -510,22 +646,23 @@ function generateScalarSchema(scalar: Scalar): string {
 function generateModelTypeSchema(
 	model: Model,
 	modelNameMap?: Map<Model, string>,
+	program?: Program,
 ): string {
 	if (model.name === "Array" && model.indexer?.value) {
 		const elementType = model.indexer.value;
-		return `z.array(${generateTypeSchema(elementType, modelNameMap)})`;
+		return `z.array(${generateTypeSchema(elementType, modelNameMap, program)})`;
 	}
 
 	if (model.indexer && model.indexer.key.name === "string") {
 		const valueType = model.indexer.value;
-		return `z.record(z.string(), ${generateTypeSchema(valueType, modelNameMap)})`;
+		return `z.record(z.string(), ${generateTypeSchema(valueType, modelNameMap, program)})`;
 	}
 
 	// Handle anonymous object literals (inline object types)
 	if (!model.name || model.name === "" || model.name === "object") {
 		const properties: string[] = [];
 		for (const [propName, prop] of model.properties) {
-			const zodType = generatePropertySchema(prop, modelNameMap);
+			const zodType = generatePropertySchema(prop, modelNameMap, program);
 			const quotedName = quotePropertyName(propName);
 			properties.push(`${quotedName}: ${zodType}`);
 		}
@@ -545,7 +682,7 @@ function generateModelTypeSchema(
 		// Generate it inline as an anonymous object
 		const properties: string[] = [];
 		for (const [propName, prop] of model.properties) {
-			const zodType = generatePropertySchema(prop, modelNameMap);
+			const zodType = generatePropertySchema(prop, modelNameMap, program);
 			const quotedName = quotePropertyName(propName);
 			properties.push(`${quotedName}: ${zodType}`);
 		}
@@ -560,6 +697,7 @@ function generateModelTypeSchema(
 function generateUnionSchema(
 	union: Union,
 	modelNameMap?: Map<Model, string>,
+	program?: Program,
 ): string {
 	const variants = Array.from(union.variants.values());
 
@@ -568,11 +706,11 @@ function generateUnionSchema(
 	}
 
 	if (variants.length === 1) {
-		return generateTypeSchema(variants[0].type, modelNameMap);
+		return generateTypeSchema(variants[0].type, modelNameMap, program);
 	}
 
 	const schemas = variants.map((variant) =>
-		generateTypeSchema(variant.type, modelNameMap),
+		generateTypeSchema(variant.type, modelNameMap, program),
 	);
 
 	return `z.union([${schemas.join(", ")}])`;
@@ -733,6 +871,7 @@ node_modules/
 }
 
 export const __test = {
+	applyConstraints,
 	containsTemplateParameter,
 	generateEnumSchema,
 	generateModelSchema,
@@ -746,6 +885,8 @@ export const __test = {
 	getModelDependencies,
 	isTemplateDeclaration,
 	isValidJavaScriptIdentifier,
+	mergeConstraints,
 	quotePropertyName,
+	toRegexLiteral,
 	topologicalSort,
 };
