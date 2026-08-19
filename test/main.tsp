@@ -430,3 +430,46 @@ namespace Widgets {
   @put
   op replacePet(@body pet: TaggedPet): TaggedPet;
 }
+
+// Two namespaces declaring the same model name. Each declaration gets its own
+// namespace-qualified schema, and a reference resolves to the declaration in
+// scope rather than to whichever one was collected last. The enums collide the
+// same way, and `Shelter.Shelf` shares a name with nothing, so it keeps the
+// bare name even though its namespace has a collision in it.
+namespace Shelter {
+  enum Size {
+    Small,
+    Large,
+  }
+
+  model Pet {
+    petId: string;
+    barks: boolean;
+    size: Size;
+  }
+
+  model Adoption {
+    pet: Pet;
+  }
+
+  model Shelf {
+    label: string;
+  }
+}
+
+namespace Aviary {
+  enum Size {
+    Tiny,
+    Huge,
+  }
+
+  model Pet {
+    petId: string;
+    wingspan: float64;
+    size: Size;
+  }
+
+  model Adoption {
+    pet: Pet;
+  }
+}
