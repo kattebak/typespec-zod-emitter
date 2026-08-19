@@ -316,6 +316,39 @@ option turns the whole output file off.
 - `url` → `z.string().url()`
 - `bytes` → `z.instanceof(Uint8Array)`
 
+### Constraints
+
+- `@minLength` / `@maxLength` → `.min()` / `.max()`
+- `@pattern` → `.regex()`
+- `@format` → `.uuid()`, `.url()` (also `uri`), `.email()`; any other format is ignored
+- `@minValue` / `@maxValue` → `.min()` / `.max()`
+
+Constraints declared on a scalar apply to every property typed with it, and a
+property can narrow them:
+
+```typespec
+@minLength(25)
+@maxLength(25)
+scalar ShortId extends string;
+
+model Order {
+  orderId: ShortId;
+
+  @minValue(1)
+  @maxValue(5)
+  rating: int32;
+}
+```
+
+Generates:
+
+```typescript
+export const OrderSchema = z.object({
+  orderId: z.string().min(25).max(25),
+  rating: z.number().min(1).max(5),
+});
+```
+
 ### Complex Types
 
 - `Array<T>` or `T[]` → `z.array(T)`
