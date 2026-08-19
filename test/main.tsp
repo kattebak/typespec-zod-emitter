@@ -267,4 +267,54 @@ namespace Widgets {
   @route("/products")
   @post
   op createProduct(@body product: ProductCreateParams): Product;
+
+  @route("/constrained")
+  @post
+  op createConstrained(@body payload: Constrained): Constrained;
+}
+
+// Test constraint decorators — each must reach the generated zod schema.
+// A scalar-level constraint must flow through to every property typed with
+// that scalar (the outage this guards against: a 36-char crypto.randomUUID()
+// passing a `z.string()` that should have been length-bounded to 25).
+@minLength(25)
+@maxLength(25)
+scalar ShortId extends string;
+
+@format("uuid")
+scalar Uuid extends string;
+
+model Constrained {
+  id: ShortId;
+  externalId: Uuid;
+
+  @minLength(2)
+  @maxLength(8)
+  nickname: string;
+
+  @pattern("^[A-Z]{2}-\\d{4}$")
+  reference: string;
+
+  @format("email")
+  contact: string;
+
+  @format("url")
+  homepage: string;
+
+  @minValue(1)
+  @maxValue(5)
+  rating: int32;
+
+  @minValue(0)
+  price: float64;
+
+  @maxLength(3)
+  code?: string;
+}
+
+// A property must be able to narrow the constraints of its own scalar type.
+model NarrowedProperty {
+  @minLength(4)
+  @maxLength(10)
+  label: ShortId;
 }

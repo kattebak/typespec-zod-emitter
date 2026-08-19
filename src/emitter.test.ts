@@ -716,6 +716,97 @@ describe("emitter helpers", () => {
 		);
 	});
 
+	// === constraints ===
+
+	it("appends string constraints in a stable order", () => {
+		assert.equal(
+			__test.applyConstraints("z.string()", {
+				minLength: 2,
+				maxLength: 8,
+				pattern: "^[a-z]+$",
+				format: "email",
+			}),
+			"z.string().email().regex(/^[a-z]+$/).min(2).max(8)",
+		);
+	});
+
+	it("appends numeric constraints", () => {
+		assert.equal(
+			__test.applyConstraints("z.number()", { minValue: 1, maxValue: 5 }),
+			"z.number().min(1).max(5)",
+		);
+	});
+
+	it("does not apply length constraints to a numeric schema", () => {
+		assert.equal(
+			__test.applyConstraints("z.number()", { minLength: 3, pattern: "x" }),
+			"z.number()",
+		);
+	});
+
+	it("does not apply value constraints to a string schema", () => {
+		assert.equal(
+			__test.applyConstraints("z.string()", { minValue: 3 }),
+			"z.string()",
+		);
+	});
+
+	it("maps known formats and ignores unknown ones", () => {
+		assert.equal(
+			__test.applyConstraints("z.string()", { format: "uuid" }),
+			"z.string().uuid()",
+		);
+		assert.equal(
+			__test.applyConstraints("z.string()", { format: "uri" }),
+			"z.string().url()",
+		);
+		assert.equal(
+			__test.applyConstraints("z.string()", { format: "ipv4" }),
+			"z.string()",
+		);
+	});
+
+	it("skips a format check the base schema already carries", () => {
+		assert.equal(
+			__test.applyConstraints("z.string().url()", { format: "url" }),
+			"z.string().url()",
+		);
+	});
+
+	it("leaves schemas that take no constraints untouched", () => {
+		assert.equal(
+			__test.applyConstraints("z.instanceof(Uint8Array)", { maxLength: 4 }),
+			"z.instanceof(Uint8Array)",
+		);
+	});
+
+	it("lets a refinement override the constraints it inherits", () => {
+		assert.deepEqual(
+			__test.mergeConstraints(
+				{ minLength: 25, maxLength: 25, format: "uuid" },
+				{ maxLength: 10 },
+			),
+			{
+				minLength: 25,
+				maxLength: 10,
+				pattern: undefined,
+				format: "uuid",
+				minValue: undefined,
+				maxValue: undefined,
+			},
+		);
+	});
+
+	it("renders patterns as regex literals, escaping unescaped slashes", () => {
+		assert.equal(
+			__test.toRegexLiteral("^[A-Z]{2}-\\d{4}$"),
+			"/^[A-Z]{2}-\\d{4}$/",
+		);
+		assert.equal(__test.toRegexLiteral("a/b"), "/a\\/b/");
+		assert.equal(__test.toRegexLiteral("a\\/b"), "/a\\/b/");
+		assert.equal(__test.toRegexLiteral("a\nb"), 'new RegExp("a\\nb")');
+	});
+
 	it("generates union schema with Number and Boolean literal variants", () => {
 		const union = {
 			variants: new Map([
