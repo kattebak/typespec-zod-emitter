@@ -318,3 +318,45 @@ model NarrowedProperty {
   @maxLength(10)
   label: ShortId;
 }
+
+// Route matching must pick the most specific route, not the first that
+// matches. A pattern tolerates a base path, so `POST /items` also matches
+// `/orders/order-1/items`, and `POST /orders/{orderId}` also matches
+// `/orders/draft`. Each pair carries a different body, so picking the wrong
+// route rejects a valid request.
+model OrderItem {
+  sku: string;
+  quantity: int32;
+}
+
+model OrderDraft {
+  note: string;
+}
+
+model CatalogItem {
+  sku: string;
+  label: string;
+}
+
+@service(#{ title: "Catalog Service" })
+@route("/items")
+namespace Catalog {
+  @post
+  op create(@body item: CatalogItem): CatalogItem;
+}
+
+@service(#{ title: "Order Service" })
+@route("/orders")
+namespace Orders {
+  @route("/{orderId}/items")
+  @post
+  op addItem(@path orderId: string, @body item: OrderItem): OrderItem;
+
+  @route("/{orderId}")
+  @post
+  op annotate(@path orderId: string, @body item: OrderItem): OrderItem;
+
+  @route("/draft")
+  @post
+  op createDraft(@body draft: OrderDraft): OrderDraft;
+}
