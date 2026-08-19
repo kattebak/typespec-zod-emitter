@@ -11,6 +11,7 @@ A custom TypeSpec emitter that generates Zod validators for TypeSpec models usin
 - Optional property handling
 - Union type support
 - TypeScript type inference ready
+- Request-validation middleware for generated HTTP clients
 
 ## Installation
 
@@ -237,12 +238,61 @@ type User = z.infer<typeof UserSchema>;
 type Post = z.infer<typeof PostSchema>;
 ```
 
+## Request Validation
+
+When the spec defines HTTP operations (`@typespec/http`), the emitter also writes
+`middleware.ts`: an operation map and a request-validation middleware for an
+openapi-generator `typescript-fetch` client.
+
+Every operation carries its method, route, a path matcher and the zod schemas for
+its JSON request body and its path, query, header and cookie parameters. The
+request body schema follows the operation's request visibility, so read-only
+properties are absent from a create body and a `PATCH` body is optional
+throughout.
+
+```typescript
+export const operations: readonly OperationSchemas[] = [
+  {
+    operationId: "Widgets_create",
+    method: "POST",
+    path: "/widgets",
+    pattern: /^.*\/widgets\/?$/,
+    pathParameterNames: [],
+    body: z.object({ name: z.string(), quantity: z.number() }),
+    parameters: {},
+  },
+];
+```
+
+Attach the middleware to the generated client and every JSON request body is
+validated before the request is sent:
+
+```typescript
+import { Configuration, WidgetsApi } from "./generated-client";
+import { validationMiddleware } from "@mycorp/zod-schemas/middleware";
+
+const widgets = new WidgetsApi(
+  new Configuration({ basePath, middleware: [validationMiddleware] }),
+);
+```
+
+A valid body is passed through untouched. An invalid one rejects the call with a
+`RequestValidationError` carrying the zod `issues`, and no request goes out.
+Requests the map does not cover, non-JSON bodies and operations without a request
+body are left alone.
+
+Validation is on by default. `createValidationMiddleware({ validate: false })`
+attaches the middleware with validation turned off, and the `emit-middleware`
+option turns the whole output file off.
+
 ## Configuration Options
 
 - `output-file`: Name of the output file (default: "schemas.ts")
 - `output-dir`: Output directory (defaults to emitter output directory)
 - `package-name`: Package name to include in generated file header (optional)
 - `package-version`: Package version to include in generated file header (optional)
+- `emit-middleware`: Emit the operation map and request-validation middleware (default: `true`)
+- `middleware-file`: Name of the middleware output file (default: "middleware.ts")
 
 **Note:** When both `package-name` and `package-version` are provided, the emitter generates a complete npm package with:
 

@@ -1,4 +1,7 @@
 import "@kattebak/typespec-zod-emitter";
+import "@typespec/http";
+
+using Http;
 
 enum Status {
 	Active,
@@ -219,4 +222,49 @@ namespace OrderingRegression {
 
 model TopSub extends OrderingRegression.NestedBase {
   ownField: string;
+}
+
+// HTTP operations drive the emitted operation map and request-validation
+// middleware. `Widget` keeps a read-only key, so the create body exercises the
+// visibility-filtered payload while `ProductCreateParams` exercises the
+// named-schema reference.
+model Widget {
+  @visibility(Lifecycle.Read)
+  widgetId: string;
+
+  name: string;
+  quantity: int32;
+  tags?: string[];
+}
+
+model WidgetUpdateParams is Update<Widget>;
+
+@service(#{ title: "Widget Service" })
+@route("/widgets")
+namespace Widgets {
+  @get
+  op list(@query status?: Status): Widget[];
+
+  @post
+  op create(@body widget: Widget): Widget;
+
+  @route("/{widgetId}")
+  @get
+  op read(@path widgetId: string): Widget;
+
+  @route("/{widgetId}")
+  @patch
+  op update(@path widgetId: string, @body widget: WidgetUpdateParams): Widget;
+
+  @route("/{widgetId}/attachments")
+  @post
+  op attach(
+    @path widgetId: string,
+    @header contentType: "text/plain",
+    @body contents: string,
+  ): void;
+
+  @route("/products")
+  @post
+  op createProduct(@body product: ProductCreateParams): Product;
 }
