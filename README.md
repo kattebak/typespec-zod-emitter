@@ -11,6 +11,7 @@ A custom TypeSpec emitter that generates Zod validators for TypeSpec models usin
 - Optional property handling
 - Union type support
 - TypeScript type inference ready
+- Namespace-qualified names when two declarations share a name
 - Request-validation middleware for generated HTTP clients
 
 ## Installation
@@ -400,6 +401,43 @@ export const ItemUploadSchema = z.object({
 ```
 
 This works for deeply nested anonymous objects as well.
+
+### Schema Names Across Namespaces
+
+A schema is named after its declaration: `model Pet` becomes `PetSchema`. When two
+declarations in different namespaces share a name, both are emitted and their names
+are prefixed with their namespace path:
+
+```typespec
+namespace Kennel {
+  model Pet {
+    barks: boolean;
+  }
+}
+
+namespace Aviary {
+  model Pet {
+    wingspan: float64;
+  }
+}
+```
+
+Generates:
+
+```typescript
+export const KennelPetSchema = z.object({ barks: z.boolean() });
+export const AviaryPetSchema = z.object({ wingspan: z.number() });
+```
+
+Only names that collide are qualified, so a spec without collisions emits exactly
+what it emitted before. Each qualification is reported as a `schema-name-qualified`
+warning. A reference resolves to the declaration it points at, not to whichever one
+shares its name.
+
+The qualified name is unique for a model or an enum, but it can still be taken by
+another declaration — a root-level `model KennelPet` alongside `Kennel.Pet`. That
+case is a `duplicate-schema-name` error and fails the compile; rename one of the
+declarations.
 
 ## Limitations
 

@@ -5,6 +5,7 @@ import type {
 	Enum,
 	Model,
 	ModelProperty,
+	Namespace,
 	Scalar,
 	Type,
 	Union,
@@ -12,6 +13,10 @@ import type {
 import { __test } from "./emitter.js";
 
 type ModelLike = Model & { kind: "Model" };
+
+function dependencyNames(dependencies: Set<Model | Enum>): Set<string> {
+	return new Set([...dependencies].map((dependency) => dependency.name));
+}
 
 describe("emitter helpers", () => {
 	it("validates identifiers and quotes invalid names", () => {
@@ -448,7 +453,7 @@ describe("emitter helpers", () => {
 			]),
 		} as unknown as Model;
 
-		const deps = __test.getModelDependencies(model);
+		const deps = dependencyNames(__test.getModelDependencies(model));
 		assert.ok(deps.has("Status"));
 	});
 
@@ -483,7 +488,7 @@ describe("emitter helpers", () => {
 		// inherited `ref` property does. If getModelDependencies only walked
 		// model.properties, this dependency would be missed and the
 		// topological sort could emit Sub's schema before Target's.
-		const deps = __test.getModelDependencies(subModel);
+		const deps = dependencyNames(__test.getModelDependencies(subModel));
 		assert.ok(deps.has("Target"));
 	});
 
@@ -508,29 +513,51 @@ describe("emitter helpers", () => {
 			]),
 		} as unknown as Model;
 
-		const deps = __test.getModelDependencies(model);
+		const deps = dependencyNames(__test.getModelDependencies(model));
 		assert.ok(deps.has("Cat"));
 	});
 
 	it("excludes self-reference from model dependencies", () => {
-		const selfRef = {
-			kind: "Model",
-			name: "TreeNode",
-			indexer: undefined,
-		} as unknown as Type;
 		const model = {
 			kind: "Model",
 			name: "TreeNode",
+			indexer: undefined,
+			properties: new Map(),
+		} as unknown as Model;
+		model.properties.set("child", {
+			type: model,
+			optional: true,
+		} as unknown as ModelProperty);
+
+		const deps = dependencyNames(__test.getModelDependencies(model));
+		assert.equal(deps.has("TreeNode"), false);
+	});
+
+	it("keeps a same-named model from another namespace as a dependency", () => {
+		const otherNamespacePet = {
+			kind: "Model",
+			name: "Pet",
+			indexer: undefined,
+			properties: new Map(),
+		} as unknown as Model;
+		const model = {
+			kind: "Model",
+			name: "Pet",
+			indexer: undefined,
 			properties: new Map([
 				[
-					"child",
-					{ type: selfRef, optional: true } as unknown as ModelProperty,
+					"companion",
+					{
+						type: otherNamespacePet,
+						optional: false,
+					} as unknown as ModelProperty,
 				],
 			]),
 		} as unknown as Model;
 
 		const deps = __test.getModelDependencies(model);
-		assert.equal(deps.has("TreeNode"), false);
+		assert.equal(deps.size, 1);
+		assert.equal(deps.has(otherNamespacePet), true);
 	});
 
 	it("gets model dependencies from Record indexer value", () => {
@@ -555,7 +582,7 @@ describe("emitter helpers", () => {
 			]),
 		} as unknown as Model;
 
-		const deps = __test.getModelDependencies(model);
+		const deps = dependencyNames(__test.getModelDependencies(model));
 		assert.ok(deps.has("Item"));
 	});
 
@@ -572,7 +599,7 @@ describe("emitter helpers", () => {
 			]),
 		} as unknown as Model;
 
-		const deps = __test.getModelDependencies(model);
+		const deps = dependencyNames(__test.getModelDependencies(model));
 		assert.equal(deps.size, 0);
 	});
 
@@ -615,7 +642,7 @@ describe("emitter helpers", () => {
 			]),
 		} as unknown as Model;
 
-		const sorted = __test.topologicalSort([modelA, modelB], []);
+		const sorted = __test.topologicalSort([modelA, modelB]);
 		assert.equal(sorted.length, 2);
 	});
 
@@ -631,19 +658,14 @@ describe("emitter helpers", () => {
 			properties: new Map(),
 		} as unknown as Model;
 
-		const sorted = __test.topologicalSort([modelX, modelY], []);
+		const sorted = __test.topologicalSort([modelX, modelY]);
 		assert.equal(sorted.length, 2);
 		const names = sorted.map((m) => m.name);
 		assert.ok(names.includes("X"));
 		assert.ok(names.includes("Y"));
 	});
 
-	it("topological sort skips enum names as dependencies", () => {
-		const enumDep = {
-			name: "Status",
-			members: new Map(),
-		} as unknown as Enum;
-
+	it("topological sort skips enum dependencies", () => {
 		const model = {
 			kind: "Model",
 			name: "Order",
@@ -651,16 +673,127 @@ describe("emitter helpers", () => {
 				[
 					"status",
 					{
-						type: { kind: "Enum", name: "Status" } as unknown as Type,
+						type: {
+							kind: "Enum",
+							name: "Status",
+							members: new Map(),
+						} as unknown as Type,
 						optional: false,
 					} as unknown as ModelProperty,
 				],
 			]),
 		} as unknown as Model;
 
-		const sorted = __test.topologicalSort([model], [enumDep]);
+		const sorted = __test.topologicalSort([model]);
 		assert.equal(sorted.length, 1);
 		assert.equal(sorted[0].name, "Order");
+	});
+
+	it("topological sort orders each of two same-named models by identity", () => {
+		const kennelPet = {
+			kind: "Model",
+			name: "Pet",
+			indexer: undefined,
+			properties: new Map(),
+		} as unknown as Model;
+		const aviaryPet = {
+			kind: "Model",
+			name: "Pet",
+			indexer: undefined,
+			properties: new Map(),
+		} as unknown as Model;
+		const adoption = {
+			kind: "Model",
+			name: "Adoption",
+			properties: new Map([
+				[
+					"pet",
+					{ type: aviaryPet, optional: false } as unknown as ModelProperty,
+				],
+			]),
+		} as unknown as Model;
+
+		const sorted = __test.topologicalSort([adoption, kennelPet, aviaryPet]);
+
+		assert.equal(sorted.length, 3);
+		assert.ok(sorted.indexOf(aviaryPet) < sorted.indexOf(adoption));
+	});
+
+	// === assignSchemaNames ===
+
+	it("keeps declared names when nothing collides", () => {
+		const pet = { kind: "Model", name: "Pet" } as unknown as Model;
+		const owner = { kind: "Model", name: "Owner" } as unknown as Model;
+
+		const { names, conflicts } = __test.assignSchemaNames([pet, owner]);
+
+		assert.equal(names.get(pet), "Pet");
+		assert.equal(names.get(owner), "Owner");
+		assert.equal(conflicts.length, 0);
+	});
+
+	it("qualifies only the colliding names with their namespace path", () => {
+		const kennel = { name: "Kennel" } as unknown as Namespace;
+		const store = { name: "Store" } as unknown as Namespace;
+		const toys = { name: "Toys", namespace: store } as unknown as Namespace;
+
+		const kennelPet = {
+			kind: "Model",
+			name: "Pet",
+			namespace: kennel,
+		} as unknown as Model;
+		const toyPet = {
+			kind: "Model",
+			name: "Pet",
+			namespace: toys,
+		} as unknown as Model;
+		const shelf = {
+			kind: "Model",
+			name: "Shelf",
+			namespace: kennel,
+		} as unknown as Model;
+		const size = {
+			kind: "Enum",
+			name: "Size",
+			namespace: toys,
+		} as unknown as Enum;
+
+		const { names, conflicts } = __test.assignSchemaNames([
+			kennelPet,
+			toyPet,
+			shelf,
+			size,
+		]);
+
+		assert.equal(names.get(kennelPet), "KennelPet");
+		assert.equal(names.get(toyPet), "StoreToysPet");
+		assert.equal(names.get(shelf), "Shelf");
+		assert.equal(names.get(size), "Size");
+		assert.equal(conflicts.length, 0);
+	});
+
+	it("reports a conflict a namespace path cannot tell apart", () => {
+		const kennel = { name: "Kennel" } as unknown as Namespace;
+		const kennelPet = {
+			kind: "Model",
+			name: "Pet",
+			namespace: kennel,
+		} as unknown as Model;
+		const rootPet = { kind: "Model", name: "Pet" } as unknown as Model;
+		const collidingRootModel = {
+			kind: "Model",
+			name: "KennelPet",
+		} as unknown as Model;
+
+		const { names, conflicts } = __test.assignSchemaNames([
+			kennelPet,
+			rootPet,
+			collidingRootModel,
+		]);
+
+		assert.equal(names.get(kennelPet), "KennelPet");
+		assert.equal(names.get(rootPet), "Pet");
+		assert.deepEqual(conflicts, [collidingRootModel]);
 	});
 
 	// === containsTemplateParameter ===

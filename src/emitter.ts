@@ -18,17 +18,19 @@ import {
 	type Union,
 } from "@typespec/compiler";
 import { $ } from "@typespec/compiler/typekit";
-import type { ZodEmitterOptions } from "./lib.js";
+import { reportDiagnostic, type ZodEmitterOptions } from "./lib.js";
 import { generateMiddleware } from "./middleware.js";
 
 // Emitted schemas call z.string().date()/.time(), added in zod 3.23, and
 // .url()/.datetime(), dropped in zod 4.
 const ZOD_PEER_RANGE = "^3.23.0";
 
+type DeclaredType = Model | Enum;
+type SchemaNames = ReadonlyMap<DeclaredType, string>;
+
 export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 	const models: Model[] = [];
 	const enums: Enum[] = [];
-	const modelNameMap = new Map<Model, string>();
 	const typekit = $(context.program);
 
 	function collectTypes(namespace: Namespace) {
@@ -40,8 +42,6 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 				!isTemplateDeclaration(model)
 			) {
 				models.push(model);
-				// Store the declared name for this model
-				modelNameMap.set(model, model.name);
 			}
 		}
 
@@ -66,6 +66,28 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 		return;
 	}
 
+	const declarations: DeclaredType[] = [...models, ...enums];
+	const { names: schemaNames, conflicts } = assignSchemaNames(declarations);
+
+	for (const declaration of declarations) {
+		const name = schemaNames.get(declaration);
+		if (name && name !== declaration.name) {
+			reportDiagnostic(context.program, {
+				code: "schema-name-qualified",
+				format: { name: declaration.name, qualified: name },
+				target: declaration,
+			});
+		}
+	}
+
+	for (const declaration of conflicts) {
+		reportDiagnostic(context.program, {
+			code: "duplicate-schema-name",
+			format: { name: schemaNames.get(declaration) ?? declaration.name },
+			target: declaration,
+		});
+	}
+
 	const outputDir = context.emitterOutputDir;
 	const outputFile = context.options["output-file"] ?? "schemas.ts";
 	const packageName = context.options["package-name"];
@@ -76,7 +98,7 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 		enums,
 		packageName,
 		packageVersion,
-		modelNameMap,
+		schemaNames,
 		context.program,
 	);
 
@@ -93,15 +115,17 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 					context.program,
 					{
 						type: (type) =>
-							generateTypeSchema(type, modelNameMap, context.program),
+							generateTypeSchema(type, schemaNames, context.program),
 						property: (property) =>
-							generatePropertySchema(property, modelNameMap, context.program),
+							generatePropertySchema(property, schemaNames, context.program),
 						propertyName: quotePropertyName,
 						properties: getAllProperties,
 					},
 					{
 						schemaNames: new Set(
-							[...models, ...enums].map((type) => `${type.name}Schema`),
+							declarations.map(
+								(type) => `${schemaName(type, schemaNames)}Schema`,
+							),
 						),
 						schemasModule: moduleSpecifier(outputFile),
 						packageName,
@@ -134,6 +158,7 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 			packageName,
 			models,
 			enums,
+			schemaNames,
 			middleware ? moduleName(middlewareFile) : undefined,
 		);
 		await emitFile(context.program, {
@@ -209,15 +234,75 @@ function containsTemplateParameter(type: Type): boolean {
 	return false;
 }
 
-function getModelDependencies(model: Model): Set<string> {
-	const dependencies = new Set<string>();
+function namespaceSegments(type: DeclaredType): string[] {
+	const segments: string[] = [];
+	for (
+		let namespace: Namespace | undefined = type.namespace;
+		namespace?.name;
+		namespace = namespace.namespace
+	) {
+		segments.unshift(namespace.name);
+	}
+	return segments;
+}
+
+// A declared name is unique per namespace, so prefixing the namespace path
+// separates declarations that share a name. Only the names that actually
+// collide are qualified, so a spec without collisions emits what it always did.
+function assignSchemaNames(types: readonly DeclaredType[]): {
+	names: Map<DeclaredType, string>;
+	conflicts: DeclaredType[];
+} {
+	const byDeclaredName = new Map<string, DeclaredType[]>();
+	for (const type of types) {
+		const group = byDeclaredName.get(type.name);
+		if (group) {
+			group.push(type);
+			continue;
+		}
+		byDeclaredName.set(type.name, [type]);
+	}
+
+	const names = new Map<DeclaredType, string>();
+	const conflicts: DeclaredType[] = [];
+	const taken = new Set<string>();
+
+	for (const [declaredName, group] of byDeclaredName) {
+		for (const type of group) {
+			names.set(
+				type,
+				group.length === 1
+					? declaredName
+					: [...namespaceSegments(type), declaredName].join(""),
+			);
+		}
+	}
+
+	for (const type of types) {
+		const name = names.get(type) ?? type.name;
+		if (taken.has(name)) {
+			conflicts.push(type);
+			continue;
+		}
+		taken.add(name);
+	}
+
+	return { names, conflicts };
+}
+
+function schemaName(type: DeclaredType, names?: SchemaNames): string {
+	return names?.get(type) ?? type.name;
+}
+
+function getModelDependencies(model: Model): Set<DeclaredType> {
+	const dependencies = new Set<DeclaredType>();
 
 	function extractDependencies(type: Type): void {
 		switch (type.kind) {
 			case "Model":
 				// Skip intrinsic models like Array, Record
 				if (!isIntrinsicModel(type) && type.name) {
-					dependencies.add(type.name);
+					dependencies.add(type);
 				}
 				// Check indexer for Record types
 				if (type.indexer?.value) {
@@ -226,7 +311,7 @@ function getModelDependencies(model: Model): Set<string> {
 				break;
 			case "Enum":
 				if (type.name) {
-					dependencies.add(type.name);
+					dependencies.add(type);
 				}
 				break;
 			case "Union":
@@ -245,52 +330,45 @@ function getModelDependencies(model: Model): Set<string> {
 	}
 
 	// Remove self-reference
-	dependencies.delete(model.name);
+	dependencies.delete(model);
 
 	return dependencies;
 }
 
-function topologicalSort(models: Model[], enums: Enum[]): Model[] {
-	const enumNames = new Set(enums.map((e) => e.name));
-	const modelMap = new Map(models.map((m) => [m.name, m]));
-	const visited = new Set<string>();
-	const visiting = new Set<string>();
+// Dependencies are tracked by type identity, not by name: two models declared
+// in different namespaces can share a name, and only identity says which one a
+// property actually refers to.
+function topologicalSort(models: Model[]): Model[] {
+	const declared = new Set(models);
+	const visited = new Set<Model>();
+	const visiting = new Set<Model>();
 	const sorted: Model[] = [];
 
-	function visit(modelName: string): void {
-		if (visited.has(modelName)) {
+	function visit(model: Model): void {
+		if (visited.has(model) || !declared.has(model)) {
 			return;
 		}
 
-		// Skip if it's an enum or doesn't exist in our model map
-		if (enumNames.has(modelName) || !modelMap.has(modelName)) {
-			return;
-		}
-
-		if (visiting.has(modelName)) {
+		if (visiting.has(model)) {
 			// Circular dependency detected - skip to avoid infinite loop
 			return;
 		}
 
-		visiting.add(modelName);
-		const model = modelMap.get(modelName);
-		if (!model) {
-			return;
-		}
-		const dependencies = getModelDependencies(model);
+		visiting.add(model);
 
-		for (const dep of dependencies) {
-			visit(dep);
+		for (const dependency of getModelDependencies(model)) {
+			if (dependency.kind === "Model") {
+				visit(dependency);
+			}
 		}
 
-		visiting.delete(modelName);
-		visited.add(modelName);
+		visiting.delete(model);
+		visited.add(model);
 		sorted.push(model);
 	}
 
-	// Visit all models
 	for (const model of models) {
-		visit(model.name);
+		visit(model);
 	}
 
 	return sorted;
@@ -301,7 +379,7 @@ function generateZodSchemas(
 	enums: Enum[],
 	packageName?: string,
 	packageVersion?: string,
-	modelNameMap?: Map<Model, string>,
+	schemaNames?: SchemaNames,
 	program?: Program,
 ): string {
 	const imports = 'import { z } from "zod";\n\n';
@@ -319,14 +397,14 @@ function generateZodSchemas(
 	}
 
 	// Sort models topologically to ensure dependencies come first
-	const sortedModels = topologicalSort(models, enums);
+	const sortedModels = topologicalSort(models);
 
 	const enumSchemas = enums
-		.map((enumType) => generateEnumSchema(enumType))
+		.map((enumType) => generateEnumSchema(enumType, schemaNames))
 		.join("\n\n");
 
 	const modelSchemas = sortedModels
-		.map((model) => generateModelSchema(model, modelNameMap, program))
+		.map((model) => generateModelSchema(model, schemaNames, program))
 		.join("\n\n");
 
 	return (
@@ -334,11 +412,12 @@ function generateZodSchemas(
 	);
 }
 
-function generateEnumSchema(enumType: Enum): string {
+function generateEnumSchema(enumType: Enum, schemaNames?: SchemaNames): string {
 	const members = Array.from(enumType.members.values());
+	const name = schemaName(enumType, schemaNames);
 
 	if (members.length === 0) {
-		return `export const ${enumType.name}Schema = z.never();`;
+		return `export const ${name}Schema = z.never();`;
 	}
 
 	const values = members.map((member) => {
@@ -346,7 +425,7 @@ function generateEnumSchema(enumType: Enum): string {
 		return typeof value === "string" ? `"${value}"` : value;
 	});
 
-	return `export const ${enumType.name}Schema = z.enum([${values.join(", ")}]);`;
+	return `export const ${name}Schema = z.enum([${values.join(", ")}]);`;
 }
 
 function isValidJavaScriptIdentifier(name: string): boolean {
@@ -426,13 +505,13 @@ function getAllProperties(model: Model): Map<string, ModelProperty> {
 
 function generateModelSchema(
 	model: Model,
-	modelNameMap?: Map<Model, string>,
+	schemaNames?: SchemaNames,
 	program?: Program,
 ): string {
 	const properties: string[] = [];
 
 	for (const [propName, prop] of getAllProperties(model)) {
-		const zodType = generatePropertySchema(prop, modelNameMap, program);
+		const zodType = generatePropertySchema(prop, schemaNames, program);
 		const quotedName = quotePropertyName(propName);
 		properties.push(`\t${quotedName}: ${zodType}`);
 	}
@@ -440,12 +519,12 @@ function generateModelSchema(
 	const schemaBody =
 		properties.length > 0 ? `{\n${properties.join(",\n")}\n}` : "{}";
 
-	return `export const ${model.name}Schema = z.object(${schemaBody});`;
+	return `export const ${schemaName(model, schemaNames)}Schema = z.object(${schemaBody});`;
 }
 
 function generatePropertySchema(
 	prop: ModelProperty,
-	modelNameMap?: Map<Model, string>,
+	schemaNames?: SchemaNames,
 	program?: Program,
 ): string {
 	// A property may narrow the constraints of its own scalar type, so the
@@ -453,7 +532,7 @@ function generatePropertySchema(
 	let schema =
 		prop.type.kind === "Scalar"
 			? generateScalarSchema(prop.type, program, prop)
-			: generateTypeSchema(prop.type, modelNameMap, program);
+			: generateTypeSchema(prop.type, schemaNames, program);
 
 	if (prop.optional) {
 		schema += ".optional()";
@@ -464,18 +543,18 @@ function generatePropertySchema(
 
 function generateTypeSchema(
 	type: Type,
-	modelNameMap?: Map<Model, string>,
+	schemaNames?: SchemaNames,
 	program?: Program,
 ): string {
 	switch (type.kind) {
 		case "Scalar":
 			return generateScalarSchema(type, program);
 		case "Model":
-			return generateModelTypeSchema(type, modelNameMap, program);
+			return generateModelTypeSchema(type, schemaNames, program);
 		case "Enum":
-			return `${type.name}Schema`;
+			return `${schemaName(type, schemaNames)}Schema`;
 		case "Union":
-			return generateUnionSchema(type, modelNameMap, program);
+			return generateUnionSchema(type, schemaNames, program);
 		case "String":
 			return `z.literal("${type.value}")`;
 		case "Number":
@@ -660,24 +739,24 @@ function generateScalarSchema(
 
 function generateModelTypeSchema(
 	model: Model,
-	modelNameMap?: Map<Model, string>,
+	schemaNames?: SchemaNames,
 	program?: Program,
 ): string {
 	if (model.name === "Array" && model.indexer?.value) {
 		const elementType = model.indexer.value;
-		return `z.array(${generateTypeSchema(elementType, modelNameMap, program)})`;
+		return `z.array(${generateTypeSchema(elementType, schemaNames, program)})`;
 	}
 
 	if (model.indexer && model.indexer.key.name === "string") {
 		const valueType = model.indexer.value;
-		return `z.record(z.string(), ${generateTypeSchema(valueType, modelNameMap, program)})`;
+		return `z.record(z.string(), ${generateTypeSchema(valueType, schemaNames, program)})`;
 	}
 
 	// Handle anonymous object literals (inline object types)
 	if (!model.name || model.name === "" || model.name === "object") {
 		const properties: string[] = [];
 		for (const [propName, prop] of model.properties) {
-			const zodType = generatePropertySchema(prop, modelNameMap, program);
+			const zodType = generatePropertySchema(prop, schemaNames, program);
 			const quotedName = quotePropertyName(propName);
 			properties.push(`${quotedName}: ${zodType}`);
 		}
@@ -687,8 +766,8 @@ function generateModelTypeSchema(
 	}
 
 	// Check if this model is in our declared models map
-	if (modelNameMap) {
-		const declaredName = modelNameMap.get(model);
+	if (schemaNames) {
+		const declaredName = schemaNames.get(model);
 		if (declaredName) {
 			return `${declaredName}Schema`;
 		}
@@ -697,7 +776,7 @@ function generateModelTypeSchema(
 		// Generate it inline as an anonymous object
 		const properties: string[] = [];
 		for (const [propName, prop] of model.properties) {
-			const zodType = generatePropertySchema(prop, modelNameMap, program);
+			const zodType = generatePropertySchema(prop, schemaNames, program);
 			const quotedName = quotePropertyName(propName);
 			properties.push(`${quotedName}: ${zodType}`);
 		}
@@ -711,7 +790,7 @@ function generateModelTypeSchema(
 
 function generateUnionSchema(
 	union: Union,
-	modelNameMap?: Map<Model, string>,
+	schemaNames?: SchemaNames,
 	program?: Program,
 ): string {
 	const variants = Array.from(union.variants.values());
@@ -721,11 +800,11 @@ function generateUnionSchema(
 	}
 
 	if (variants.length === 1) {
-		return generateTypeSchema(variants[0].type, modelNameMap, program);
+		return generateTypeSchema(variants[0].type, schemaNames, program);
 	}
 
 	const schemas = variants.map((variant) =>
-		generateTypeSchema(variant.type, modelNameMap, program),
+		generateTypeSchema(variant.type, schemaNames, program),
 	);
 
 	return `z.union([${schemas.join(", ")}])`;
@@ -788,11 +867,16 @@ function generateReadme(
 	packageName: string,
 	models: Model[],
 	enums: Enum[],
+	schemaNames?: SchemaNames,
 	middlewareModule?: string,
 ): string {
 	const schemaList = [
-		...enums.map((e) => `- \`${e.name}Schema\` - Enum for ${e.name}`),
-		...models.map((m) => `- \`${m.name}Schema\` - ${m.name} model`),
+		...enums.map(
+			(e) => `- \`${schemaName(e, schemaNames)}Schema\` - Enum for ${e.name}`,
+		),
+		...models.map(
+			(m) => `- \`${schemaName(m, schemaNames)}Schema\` - ${m.name} model`,
+		),
 	];
 
 	const middlewareSection = middlewareModule
@@ -819,6 +903,10 @@ middleware with validation turned off.
 `
 		: "";
 
+	const exampleName = models[0]
+		? schemaName(models[0], schemaNames)
+		: undefined;
+
 	return `# ${packageName}
 
 Auto-generated Zod schemas from TypeSpec definitions.
@@ -836,7 +924,7 @@ supported.
 ## Usage
 
 \`\`\`typescript
-import { ${models[0]?.name}Schema } from "${packageName}";
+import { ${exampleName}Schema } from "${packageName}";
 import { z } from "zod";
 
 // Validate data
@@ -844,10 +932,10 @@ const data = {
   // your data here
 };
 
-const validated = ${models[0]?.name}Schema.parse(data);
+const validated = ${exampleName}Schema.parse(data);
 
 // Type inference
-type ${models[0]?.name} = z.infer<typeof ${models[0]?.name}Schema>;
+type ${exampleName} = z.infer<typeof ${exampleName}Schema>;
 \`\`\`
 
 ## Available Schemas
@@ -896,6 +984,7 @@ node_modules/
 export const __test = {
 	ZOD_PEER_RANGE,
 	applyConstraints,
+	assignSchemaNames,
 	containsTemplateParameter,
 	generateEnumSchema,
 	generateModelSchema,

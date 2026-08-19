@@ -477,6 +477,63 @@ describe("zod schema smoke tests", () => {
 			}),
 		);
 	});
+
+	it("emits a namespace-qualified schema per colliding declaration", () => {
+		assert.equal(Schemas.PetSchema, undefined);
+		assert.equal(Schemas.SizeSchema, undefined);
+
+		const shelterPet = Schemas.ShelterPetSchema.parse({
+			petId: "pet-1",
+			barks: true,
+			size: "Large",
+		});
+		const aviaryPet = Schemas.AviaryPetSchema.parse({
+			petId: "pet-2",
+			wingspan: 1.4,
+			size: "Huge",
+		});
+
+		assert.equal(shelterPet.barks, true);
+		assert.equal(aviaryPet.wingspan, 1.4);
+		assert.throws(() =>
+			Schemas.ShelterPetSchema.parse({
+				petId: "pet-2",
+				wingspan: 1.4,
+				size: "Huge",
+			}),
+		);
+		assert.throws(() =>
+			Schemas.AviaryPetSchema.parse({
+				petId: "pet-1",
+				barks: true,
+				size: "Large",
+			}),
+		);
+		assert.throws(() => Schemas.ShelterSizeSchema.parse("Tiny"));
+		assert.throws(() => Schemas.AviarySizeSchema.parse("Large"));
+	});
+
+	it("resolves a reference to the declaration in its own namespace", () => {
+		const shelterAdoption = Schemas.ShelterAdoptionSchema.parse({
+			pet: { petId: "pet-1", barks: false, size: "Small" },
+		});
+		const aviaryAdoption = Schemas.AviaryAdoptionSchema.parse({
+			pet: { petId: "pet-2", wingspan: 0.3, size: "Tiny" },
+		});
+
+		assert.equal(shelterAdoption.pet.barks, false);
+		assert.equal(aviaryAdoption.pet.wingspan, 0.3);
+		assert.throws(() =>
+			Schemas.ShelterAdoptionSchema.parse({
+				pet: { petId: "pet-2", wingspan: 0.3, size: "Tiny" },
+			}),
+		);
+	});
+
+	it("leaves a name that collides with nothing unqualified", () => {
+		assert.equal(Schemas.ShelterShelfSchema, undefined);
+		assert.equal(Schemas.ShelfSchema.parse({ label: "top" }).label, "top");
+	});
 });
 
 const BASE_PATH = "https://api.example.com/v1";
