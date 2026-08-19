@@ -264,6 +264,12 @@ export const operations: readonly OperationSchemas[] = [
 ];
 ```
 
+A matcher tolerates a base path, so several routes can match one request path.
+`findOperation` returns the most specific of them: a literal segment beats a
+parameter segment, and a longer path beats a shorter one, so
+`POST /orders/{orderId}/items` wins over `POST /items` and `POST /orders/draft`
+wins over `POST /orders/{orderId}`.
+
 Attach the middleware to the generated client and every JSON request body is
 validated before the request is sent:
 

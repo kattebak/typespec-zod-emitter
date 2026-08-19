@@ -453,7 +453,7 @@ describe("request validation middleware smoke tests", () => {
 		const update = findOperation("PATCH", `${BASE_PATH}/widgets/widget-1`);
 		const list = findOperation("get", `${BASE_PATH}/widgets?status=Active`);
 
-		assert.equal(operations.length, 7);
+		assert.equal(operations.length, 11);
 		assert.equal(create.operationId, "Widgets_create");
 		assert.equal(update.operationId, "Widgets_update");
 		assert.equal(list.operationId, "Widgets_list");
@@ -585,5 +585,52 @@ describe("request validation middleware smoke tests", () => {
 			undefined,
 		);
 		await assert.rejects(() => createValidationMiddleware().pre(context));
+	});
+});
+
+describe("route specificity smoke tests", () => {
+	it("prefers a literal segment over a parameter segment", () => {
+		assert.equal(
+			findOperation("POST", `${BASE_PATH}/orders/draft`).operationId,
+			"Orders_createDraft",
+		);
+		assert.equal(
+			findOperation("POST", `${BASE_PATH}/orders/order-1`).operationId,
+			"Orders_annotate",
+		);
+	});
+
+	it("prefers the longer path when a shorter route also matches", () => {
+		assert.equal(
+			findOperation("POST", `${BASE_PATH}/orders/order-1/items`).operationId,
+			"Orders_addItem",
+		);
+		assert.equal(
+			findOperation("POST", `${BASE_PATH}/items`).operationId,
+			"Catalog_create",
+		);
+	});
+
+	it("validates the body of the route it picked", async () => {
+		const item = request("POST", "/orders/order-1/items", {
+			sku: "sku-1",
+			quantity: 2,
+		});
+		const draft = request("POST", "/orders/draft", { note: "hold until paid" });
+		const invalid = request("POST", "/orders/order-1/items", { sku: "sku-1" });
+
+		assert.equal(await validationMiddleware.pre(item), undefined);
+		assert.equal(await validationMiddleware.pre(draft), undefined);
+		await assert.rejects(
+			() => validationMiddleware.pre(invalid),
+			(error) => {
+				assert.equal(error.operationId, "Orders_addItem");
+				assert.equal(
+					error.issues.some((issue) => issue.path.join(".") === "quantity"),
+					true,
+				);
+				return true;
+			},
+		);
 	});
 });

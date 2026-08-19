@@ -419,6 +419,32 @@ export class RequestValidationError extends Error {
 	}
 }
 
+// A route pattern tolerates a base path, so a short route matches a longer
+// request path too: /items matches /orders/order-1/items. Matching walks the
+// most specific route first, where a literal segment beats a parameter segment
+// and a longer path beats a shorter one.
+const routes: readonly OperationSchemas[] = [...operations].sort(
+	(left, right) => compareSpecificity(left.path, right.path),
+);
+
+function pathSegments(path: string): string[] {
+	return path.split("/").filter((segment) => segment !== "");
+}
+
+function literalSegmentCount(segments: readonly string[]): number {
+	return segments.filter((segment) => !segment.includes("{")).length;
+}
+
+function compareSpecificity(left: string, right: string): number {
+	const leftSegments = pathSegments(left);
+	const rightSegments = pathSegments(right);
+
+	return (
+		literalSegmentCount(rightSegments) - literalSegmentCount(leftSegments) ||
+		rightSegments.length - leftSegments.length
+	);
+}
+
 export function findOperation(
 	method: string,
 	url: string,
@@ -426,7 +452,7 @@ export function findOperation(
 	const wanted = method.toUpperCase();
 	const pathname = pathnameOf(url);
 
-	return operations.find(
+	return routes.find(
 		(operation) =>
 			operation.method === wanted && operation.pattern.test(pathname),
 	);
