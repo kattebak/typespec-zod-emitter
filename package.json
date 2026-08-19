@@ -31,7 +31,7 @@
 		"test:emit": "tsp compile test/main.tsp --config test/tspconfig.yaml",
 		"test:package": "npm run test:emit && tsc -p build/zod-schemas",
 		"test:example": "npm run test:package && node --test test/example.js",
-		"test:unit": "node --test --import=tsx src/**/*.test.ts",
+		"test:unit": "node --test --import=tsx src/*.test.ts",
 		"prepublishOnly": "tsc"
 	},
 	"dependencies": {
@@ -42,10 +42,10 @@
 		"@typespec/http": "^1.4.0",
 		"tsx": "^4.20.5",
 		"typescript": "^5.9.3",
-		"zod": "^3.0.0"
+		"zod": "^3.23.0"
 	},
 	"peerDependencies": {
 		"@typespec/http": "^1.4.0",
-		"zod": "^3.0.0"
+		"zod": "^3.23.0"
 	}
 }

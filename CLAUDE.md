@@ -26,6 +26,7 @@ A TypeSpec compiler emitter that generates Zod validation schemas from TypeSpec 
 ## Testing
 
 - Unit tests (`src/emitter.test.ts`, `src/middleware.test.ts`): test internal helpers via `__test` export — identifiers, enums, scalars, unions, topological sort, anonymous objects, templates, route patterns, payload visibility
+- Emitter tests (`src/onemit.test.ts`): drive `$onEmit` over in-memory specs with `createTester` from `@typespec/compiler/testing` — option branches, early returns, package scaffolding
 - Smoke tests (`test/example.js`): compile `test/main.tsp`, then import and validate the emitted Zod schemas
 - Node built-in test runner (`node:test`), assertions via `node:assert/strict`
 - No mocking frameworks; unit tests use lightweight type stubs

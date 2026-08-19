@@ -21,6 +21,10 @@ import { $ } from "@typespec/compiler/typekit";
 import type { ZodEmitterOptions } from "./lib.js";
 import { generateMiddleware } from "./middleware.js";
 
+// Emitted schemas call z.string().date()/.time(), added in zod 3.23, and
+// .url()/.datetime(), dropped in zod 4.
+const ZOD_PEER_RANGE = "^3.23.0";
+
 export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 	const models: Model[] = [];
 	const enums: Enum[] = [];
@@ -117,6 +121,7 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 		const packageJsonContent = generatePackageJson(
 			packageName,
 			packageVersion,
+			outputFile,
 			middleware ? middlewareFile : undefined,
 		);
 		await emitFile(context.program, {
@@ -727,6 +732,7 @@ function moduleSpecifier(fileName: string): string {
 function generatePackageJson(
 	packageName: string,
 	packageVersion: string,
+	outputFile: string,
 	middlewareFile?: string,
 ): string {
 	const middlewareExport = middlewareFile
@@ -738,16 +744,19 @@ function generatePackageJson(
 			}
 		: {};
 
+	const schemasTypes = `./${moduleName(outputFile)}.d.ts`;
+	const schemasDefault = moduleSpecifier(outputFile);
+
 	const packageJson = {
 		name: packageName,
 		version: packageVersion,
 		type: "module",
-		main: "./schemas.js",
-		types: "./schemas.d.ts",
+		main: schemasDefault,
+		types: schemasTypes,
 		exports: {
 			".": {
-				types: "./schemas.d.ts",
-				default: "./schemas.js",
+				types: schemasTypes,
+				default: schemasDefault,
 			},
 			...middlewareExport,
 		},
@@ -755,7 +764,7 @@ function generatePackageJson(
 			prepare: "tsc",
 		},
 		peerDependencies: {
-			zod: "^3.0.0",
+			zod: ZOD_PEER_RANGE,
 		},
 		devDependencies: {
 			typescript: "^5.0.0",
@@ -807,8 +816,12 @@ Auto-generated Zod schemas from TypeSpec definitions.
 ## Installation
 
 \`\`\`bash
-npm install ${packageName} zod
+npm install ${packageName} zod@${ZOD_PEER_RANGE}
 \`\`\`
+
+The schemas use the zod 3 string format checks \`.url()\`, \`.datetime()\`,
+\`.date()\` and \`.time()\`, so the peer range is \`${ZOD_PEER_RANGE}\`. Zod 4 is not
+supported.
 
 ## Usage
 
@@ -871,6 +884,7 @@ node_modules/
 }
 
 export const __test = {
+	ZOD_PEER_RANGE,
 	applyConstraints,
 	containsTemplateParameter,
 	generateEnumSchema,
