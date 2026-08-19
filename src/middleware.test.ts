@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { Model, ModelProperty, Program, Type } from "@typespec/compiler";
-import { type HttpOperation, Visibility } from "@typespec/http";
+import { createTestHost } from "@typespec/compiler/testing";
+import {
+	createMetadataInfo,
+	getAllHttpServices,
+	type HttpOperation,
+	resolveRequestVisibility,
+	Visibility,
+} from "@typespec/http";
+import { HttpTestLibrary } from "@typespec/http/testing";
 import { __test, isHttpEnabled } from "./middleware.js";
 
 const codegen = {
@@ -196,6 +204,212 @@ describe("middleware helpers", () => {
 		assert.equal(
 			__test.generateHeader("my-api", "1.0.0"),
 			"/**\n * Package: my-api\n * Version: 1.0.0\n */\n",
+		);
+	});
+});
+
+async function compile(source: string): Promise<Program> {
+	const host = await createTestHost({ libraries: [HttpTestLibrary] });
+	host.addTypeSpecFile(
+		"main.tsp",
+		`import "@typespec/http";\nusing Http;\n${source}`,
+	);
+	await host.compile("main.tsp");
+	return host.program;
+}
+
+function requestVisibilities(program: Program): Map<string, Visibility> {
+	const [services] = getAllHttpServices(program);
+
+	return new Map(
+		services
+			.flatMap((service) => service.operations)
+			.map((operation) => [
+				operation.operation.name,
+				resolveRequestVisibility(program, operation.operation, operation.verb),
+			]),
+	);
+}
+
+function payloadContextFor(program: Program) {
+	return {
+		codegen,
+		metadata: createMetadataInfo(program),
+		identical: new Map(),
+		visiting: new Set(),
+	};
+}
+
+function bodyTypes(program: Program): Map<string, Type> {
+	const [services] = getAllHttpServices(program);
+
+	return new Map(
+		services
+			.flatMap((service) => service.operations)
+			.flatMap((operation) => {
+				const body = operation.parameters.body;
+				return body?.bodyKind === "single"
+					? [[operation.operation.name, body.type] as const]
+					: [];
+			}),
+	);
+}
+
+function bodySchemas(program: Program): Map<string, string> {
+	const [services] = getAllHttpServices(program);
+	const context = payloadContextFor(program);
+
+	const entries = services
+		.flatMap((service) => service.operations)
+		.flatMap((operation) => {
+			const body = operation.parameters.body;
+			if (!body || body.bodyKind !== "single") {
+				return [];
+			}
+			const visibility = resolveRequestVisibility(
+				program,
+				operation.operation,
+				operation.verb,
+			);
+			return [
+				[
+					operation.operation.name,
+					__test.payloadSchema(body.type, visibility, context, body.isExplicit),
+				] as const,
+			];
+		});
+
+	return new Map(entries);
+}
+
+const KENNEL_SERVICE = `
+model Kennel {
+  @visibility(Lifecycle.Read)
+  kennelId: string;
+
+  @visibility(Lifecycle.Create)
+  registrationCode: string;
+
+  @visibility(Lifecycle.Update)
+  supersedesKennelId: string;
+
+  name: string;
+}
+
+@service
+@route("/kennels")
+namespace Kennels {
+  @post
+  op create(@body kennel: Kennel): Kennel;
+
+  @route("/{kennelId}")
+  @put
+  op replace(@path kennelId: string, @body kennel: Kennel): Kennel;
+
+  @route("/{kennelId}")
+  @patch
+  op update(@path kennelId: string, @body kennel: Kennel): Kennel;
+}
+`;
+
+describe("payload visibility against compiler metadata", () => {
+	it("resolves the verb visibilities the payload walk is driven by", async () => {
+		const visibilities = requestVisibilities(await compile(KENNEL_SERVICE));
+
+		assert.equal(visibilities.get("create"), Visibility.Create);
+		assert.equal(visibilities.get("update"), Visibility.Update);
+		assert.equal(
+			visibilities.get("replace"),
+			Visibility.Create | Visibility.Update,
+		);
+	});
+
+	it("keeps create-only and update-only properties in a PUT body", async () => {
+		const bodies = bodySchemas(await compile(KENNEL_SERVICE));
+
+		assert.equal(
+			bodies.get("create"),
+			"z.object({ registrationCode: z.string(), name: z.string() })",
+		);
+		assert.equal(
+			bodies.get("update"),
+			"z.object({ supersedesKennelId: z.string(), name: z.string() })",
+		);
+		assert.equal(
+			bodies.get("replace"),
+			"z.object({ registrationCode: z.string(), supersedesKennelId: z.string(), name: z.string() })",
+		);
+	});
+
+	it("leaves a PUT body required where a merge-patch body is optional", async () => {
+		const program = await compile(`
+model Kennel {
+  name: string;
+  capacity: int32;
+}
+
+@service
+@route("/kennels")
+namespace Kennels {
+  @route("/{kennelId}")
+  @put
+  op replace(@path kennelId: string, @body kennel: Kennel): Kennel;
+}
+`);
+		const kennel = bodyTypes(program).get("replace");
+		assert.ok(kennel);
+
+		// The Patch flag is what makes a property optional; the Create|Update
+		// bitmask a PUT resolves to does not carry it.
+		assert.equal(
+			__test.payloadSchema(
+				kennel,
+				Visibility.Create | Visibility.Update,
+				payloadContextFor(program),
+			),
+			"<Kennel>",
+		);
+		assert.equal(
+			__test.payloadSchema(
+				kennel,
+				Visibility.Update | Visibility.Patch,
+				payloadContextFor(program),
+			),
+			"z.object({ name: z.string().optional(), capacity: z.string().optional() })",
+		);
+	});
+
+	it("inlines a declared union whose variants transform under visibility", async () => {
+		const bodies = bodySchemas(
+			await compile(`
+model Collar {
+  @visibility(Lifecycle.Read)
+  collarId: string;
+
+  material: string;
+}
+
+model Microchip {
+  chipId: string;
+}
+
+union PetTag {
+  collar: Collar,
+  microchip: Microchip,
+}
+
+@service
+@route("/pets")
+namespace Pets {
+  @post
+  op tag(@body tag: PetTag): void;
+}
+`),
+		);
+
+		assert.equal(
+			bodies.get("tag"),
+			"z.union([z.object({ material: z.string() }), <Microchip>])",
 		);
 	});
 });

@@ -432,6 +432,51 @@ describe("zod schema smoke tests", () => {
 		assert.equal(result.ref.label, "hello");
 		assert.throws(() => Schemas.TopSubSchema.parse({ ownField: "value" }));
 	});
+
+	it("inlines a declared union at every reference", () => {
+		assert.equal("PetTagSchema" in Schemas, false);
+		assert.equal("FeedingScheduleSchema" in Schemas, false);
+
+		const collared = Schemas.TaggedPetSchema.parse({
+			petId: "pet-1",
+			tag: { material: "leather", sizeCm: 40 },
+			feeding: "daily",
+			spare: null,
+		});
+		assert.equal(collared.tag.material, "leather");
+		assert.equal(collared.spare, null);
+
+		const chipped = Schemas.TaggedPetSchema.parse({
+			petId: "pet-2",
+			tag: { chipId: "chip-1", registry: "eu" },
+			feeding: "weekly",
+			spare: { material: "nylon", sizeCm: 30 },
+		});
+		assert.equal(chipped.tag.chipId, "chip-1");
+		assert.equal(chipped.spare.sizeCm, 30);
+
+		assert.throws(() =>
+			Schemas.TaggedPetSchema.parse({ ...chipped, feeding: "hourly" }),
+		);
+		assert.throws(() =>
+			Schemas.TaggedPetSchema.parse({
+				...chipped,
+				tag: { material: "leather" },
+			}),
+		);
+	});
+
+	it("keeps a null union variant from widening the union", () => {
+		// A `null` variant emitted as z.unknown() would make every value valid.
+		assert.throws(() =>
+			Schemas.TaggedPetSchema.parse({
+				petId: "pet-3",
+				tag: { chipId: "chip-1", registry: "eu" },
+				feeding: "daily",
+				spare: 42,
+			}),
+		);
+	});
 });
 
 const BASE_PATH = "https://api.example.com/v1";
@@ -453,7 +498,7 @@ describe("request validation middleware smoke tests", () => {
 		const update = findOperation("PATCH", `${BASE_PATH}/widgets/widget-1`);
 		const list = findOperation("get", `${BASE_PATH}/widgets?status=Active`);
 
-		assert.equal(operations.length, 11);
+		assert.equal(operations.length, 15);
 		assert.equal(create.operationId, "Widgets_create");
 		assert.equal(update.operationId, "Widgets_update");
 		assert.equal(list.operationId, "Widgets_list");
@@ -575,6 +620,101 @@ describe("request validation middleware smoke tests", () => {
 		assert.equal(await validationMiddleware.pre(unmapped), undefined);
 		assert.equal(await validationMiddleware.pre(withoutBody), undefined);
 		assert.equal(await validationMiddleware.pre(nonJson), undefined);
+	});
+
+	it("keeps create-only and update-only properties in a PUT body", () => {
+		const create = findOperation("POST", `${BASE_PATH}/widgets/kennels`);
+		const replace = findOperation(
+			"PUT",
+			`${BASE_PATH}/widgets/kennels/kennel-1`,
+		);
+		const update = findOperation(
+			"PATCH",
+			`${BASE_PATH}/widgets/kennels/kennel-1`,
+		);
+
+		const full = {
+			kennelId: "kennel-1",
+			registrationCode: "reg-1",
+			supersedesKennelId: "kennel-0",
+			name: "Sunny Kennel",
+			capacity: 12,
+		};
+
+		assert.deepEqual(create.body.parse(full), {
+			registrationCode: "reg-1",
+			name: "Sunny Kennel",
+			capacity: 12,
+		});
+		assert.deepEqual(update.body.parse(full), {
+			supersedesKennelId: "kennel-0",
+			name: "Sunny Kennel",
+			capacity: 12,
+		});
+		assert.deepEqual(replace.body.parse(full), {
+			registrationCode: "reg-1",
+			supersedesKennelId: "kennel-0",
+			name: "Sunny Kennel",
+			capacity: 12,
+		});
+
+		// PUT resolves Create|Update, so dropping either half fails, and neither
+		// half is made optional the way a merge-patch body would be.
+		assert.throws(() =>
+			replace.body.parse({ ...full, registrationCode: undefined }),
+		);
+		assert.throws(() =>
+			replace.body.parse({ ...full, supersedesKennelId: undefined }),
+		);
+	});
+
+	it("validates a PUT body before the request is sent", async () => {
+		const valid = request("PUT", "/widgets/kennels/kennel-1", {
+			registrationCode: "reg-1",
+			supersedesKennelId: "kennel-0",
+			name: "Sunny Kennel",
+			capacity: 12,
+		});
+		const missingCreateOnly = request("PUT", "/widgets/kennels/kennel-1", {
+			supersedesKennelId: "kennel-0",
+			name: "Sunny Kennel",
+			capacity: 12,
+		});
+
+		assert.equal(await validationMiddleware.pre(valid), undefined);
+		await assert.rejects(
+			() => validationMiddleware.pre(missingCreateOnly),
+			(error) => {
+				assert.equal(error.operationId, "Widgets_replaceKennel");
+				assert.equal(
+					error.issues.some(
+						(issue) => issue.path.join(".") === "registrationCode",
+					),
+					true,
+				);
+				return true;
+			},
+		);
+	});
+
+	it("validates a body typed as a declared union", async () => {
+		const valid = request("PUT", "/widgets/pets", {
+			petId: "pet-1",
+			tag: { chipId: "chip-1", registry: "eu" },
+			feeding: "daily",
+			spare: null,
+		});
+		const invalid = request("PUT", "/widgets/pets", {
+			petId: "pet-1",
+			tag: { chipId: "chip-1", registry: "eu" },
+			feeding: "daily",
+			spare: 42,
+		});
+
+		assert.equal(await validationMiddleware.pre(valid), undefined);
+		await assert.rejects(() => validationMiddleware.pre(invalid), {
+			name: "RequestValidationError",
+		});
 	});
 
 	it("skips validation when the opt-out flag is set", async () => {

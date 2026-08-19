@@ -360,3 +360,73 @@ namespace Orders {
   @post
   op createDraft(@body draft: OrderDraft): OrderDraft;
 }
+
+// A declared `union` is not emitted as a schema of its own — every reference
+// inlines the variant schemas. Model variants must still be tracked as
+// topological-sort dependencies of the model that references the union.
+model Collar {
+  material: string;
+  sizeCm: int32;
+}
+
+model Microchip {
+  chipId: string;
+  registry: string;
+}
+
+union PetTag {
+  collar: Collar,
+  microchip: Microchip,
+}
+
+union FeedingSchedule {
+  daily: "daily",
+  weekly: "weekly",
+}
+
+union OptionalCollar {
+  collar: Collar,
+  none: null,
+}
+
+model TaggedPet {
+  petId: string;
+  tag: PetTag;
+  feeding: FeedingSchedule;
+  spare: OptionalCollar;
+}
+
+// PUT resolves `Visibility.Create | Visibility.Update`, a bitmask neither POST
+// (Create) nor PATCH (Update) produces: the body keeps create-only *and*
+// update-only properties, and leaves required properties required.
+model Kennel {
+  @visibility(Lifecycle.Read)
+  kennelId: string;
+
+  @visibility(Lifecycle.Create)
+  registrationCode: string;
+
+  @visibility(Lifecycle.Update)
+  supersedesKennelId: string;
+
+  name: string;
+  capacity: int32;
+}
+
+namespace Widgets {
+  @route("/kennels")
+  @post
+  op createKennel(@body kennel: Kennel): Kennel;
+
+  @route("/kennels/{kennelId}")
+  @put
+  op replaceKennel(@path kennelId: string, @body kennel: Kennel): Kennel;
+
+  @route("/kennels/{kennelId}")
+  @patch
+  op updateKennel(@path kennelId: string, @body kennel: Kennel): Kennel;
+
+  @route("/pets")
+  @put
+  op replacePet(@body pet: TaggedPet): TaggedPet;
+}
