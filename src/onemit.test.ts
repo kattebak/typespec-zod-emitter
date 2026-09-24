@@ -185,3 +185,95 @@ describe("$onEmit", () => {
 		assert.equal(manifest.devDependencies.zod, __test.ZOD_PEER_RANGE);
 	});
 });
+
+async function emitUnion(variants: string, union: string): Promise<string> {
+	const [result] = await Tester.compileAndDiagnose(`
+		enum Kind { A: "A", B: "B" }
+		${variants}
+		${union}
+		model Holder { shape: Shape; }
+	`);
+
+	await $onEmit({
+		program: result.program,
+		emitterOutputDir: outputDir,
+		options: { "emit-middleware": false },
+	} as unknown as EmitContext<ZodEmitterOptions>);
+
+	const schemas = result.fs.fs.get(`${outputDir}/schemas.ts`) ?? "";
+	return schemas.match(/shape: (.*)/)?.[1] ?? "";
+}
+
+const noEnvelope =
+	'@discriminated(#{ envelope: "none", discriminatorPropertyName: "kind" })';
+
+describe("discriminated unions", () => {
+	it("emits z.discriminatedUnion for enum member discriminators", async () => {
+		const shape = await emitUnion(
+			"model Alpha { kind: Kind.A; a: string; } model Beta { kind: Kind.B; b: string; }",
+			`${noEnvelope} union Shape { A: Alpha, B: Beta }`,
+		);
+
+		assert.equal(
+			shape,
+			'z.discriminatedUnion("kind", [AlphaSchema, BetaSchema])',
+		);
+	});
+
+	it("emits z.discriminatedUnion for string literal discriminators", async () => {
+		const shape = await emitUnion(
+			'model Alpha { kind: "A"; } model Beta { kind: "B"; }',
+			`${noEnvelope} union Shape { A: Alpha, B: Beta }`,
+		);
+
+		assert.equal(
+			shape,
+			'z.discriminatedUnion("kind", [AlphaSchema, BetaSchema])',
+		);
+	});
+
+	const fallbacks: [string, string, string][] = [
+		[
+			"an undecorated union",
+			"model Alpha { kind: Kind.A; } model Beta { kind: Kind.B; }",
+			"union Shape { A: Alpha, B: Beta }",
+		],
+		[
+			"the default object envelope",
+			"model Alpha { kind: Kind.A; } model Beta { kind: Kind.B; }",
+			'@discriminated(#{ discriminatorPropertyName: "kind" }) union Shape { A: Alpha, B: Beta }',
+		],
+		[
+			"a non-literal discriminator",
+			"model Alpha { kind: string; } model Beta { kind: Kind.B; }",
+			`${noEnvelope} union Shape { A: Alpha, B: Beta }`,
+		],
+		[
+			"an optional discriminator",
+			"model Alpha { kind?: Kind.A; } model Beta { kind: Kind.B; }",
+			`${noEnvelope} union Shape { A: Alpha, B: Beta }`,
+		],
+		[
+			"a missing discriminator",
+			"model Alpha { a: string; } model Beta { kind: Kind.B; }",
+			`${noEnvelope} union Shape { A: Alpha, B: Beta }`,
+		],
+		[
+			"a variant that is not a model",
+			"model Beta { kind: Kind.B; }",
+			`${noEnvelope} union Shape { A: string, B: Beta }`,
+		],
+		[
+			"a default variant",
+			"model Alpha { kind: Kind.A; } model Beta { kind: Kind.B; } model Other { kind: string; }",
+			`${noEnvelope} union Shape { A: Alpha, B: Beta, Other }`,
+		],
+	];
+
+	for (const [label, variants, union] of fallbacks) {
+		it(`falls back to z.union for ${label}`, async () => {
+			const shape = await emitUnion(variants, union);
+			assert.match(shape, /^z\.union\(\[/);
+		});
+	}
+});

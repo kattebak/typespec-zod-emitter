@@ -2,6 +2,7 @@ import type { EmitContext } from "@typespec/compiler";
 import {
 	type Enum,
 	emitFile,
+	getDiscriminatedUnion,
 	getFormat,
 	getMaxLength,
 	getMaxValue,
@@ -813,7 +814,64 @@ function generateUnionSchema(
 		generateTypeSchema(variant.type, schemaNames, program),
 	);
 
+	const discriminator = program && discriminatorProperty(program, union);
+	if (discriminator) {
+		return `z.discriminatedUnion(${JSON.stringify(discriminator)}, [${schemas.join(", ")}])`;
+	}
+
 	return `z.union([${schemas.join(", ")}])`;
+}
+
+// z.discriminatedUnion only takes object schemas that pin the discriminator to
+// a unique literal; anything else stays a plain z.union.
+function discriminatorProperty(
+	program: Program,
+	union: Union,
+): string | undefined {
+	const [discriminated] = getDiscriminatedUnion(program, union);
+	if (
+		!discriminated ||
+		discriminated.options.envelope !== "none" ||
+		discriminated.defaultVariant
+	) {
+		return undefined;
+	}
+
+	const propertyName = discriminated.options.discriminatorPropertyName;
+	const seen = new Set<string>();
+	for (const variant of union.variants.values()) {
+		if (variant.type.kind !== "Model") {
+			return undefined;
+		}
+		const property = variant.type.properties.get(propertyName);
+		if (!property || property.optional) {
+			return undefined;
+		}
+		const value = literalValue(property.type);
+		if (value === undefined) {
+			return undefined;
+		}
+		const key = JSON.stringify(value);
+		if (seen.has(key)) {
+			return undefined;
+		}
+		seen.add(key);
+	}
+
+	return propertyName;
+}
+
+function literalValue(type: Type): string | number | boolean | undefined {
+	switch (type.kind) {
+		case "String":
+		case "Number":
+		case "Boolean":
+			return type.value;
+		case "EnumMember":
+			return type.value ?? type.name;
+		default:
+			return undefined;
+	}
 }
 
 function moduleName(fileName: string): string {
