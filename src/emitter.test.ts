@@ -312,6 +312,33 @@ describe("emitter helpers", () => {
 		assert.equal(__test.generateTypeSchema(enumType), "StatusSchema");
 	});
 
+	it("generates literal schemas for enum members", () => {
+		const named = { kind: "EnumMember", name: "A" } as unknown as Type;
+		const valued = {
+			kind: "EnumMember",
+			name: "A",
+			value: "alpha",
+		} as unknown as Type;
+		const numeric = {
+			kind: "EnumMember",
+			name: "One",
+			value: 1,
+		} as unknown as Type;
+		const quoted = {
+			kind: "EnumMember",
+			name: "Q",
+			value: 'say "hi"',
+		} as unknown as Type;
+
+		assert.equal(__test.generateTypeSchema(named), 'z.literal("A")');
+		assert.equal(__test.generateTypeSchema(valued), 'z.literal("alpha")');
+		assert.equal(__test.generateTypeSchema(numeric), "z.literal(1)");
+		assert.equal(
+			__test.generateTypeSchema(quoted),
+			'z.literal("say \\"hi\\"")',
+		);
+	});
+
 	it("generates type schema for Number literal", () => {
 		const numType = { kind: "Number", value: 42 } as unknown as Type;
 		assert.equal(__test.generateTypeSchema(numType), "z.literal(42)");

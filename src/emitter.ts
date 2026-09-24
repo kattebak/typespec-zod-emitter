@@ -556,7 +556,9 @@ function generateTypeSchema(
 		case "Union":
 			return generateUnionSchema(type, schemaNames, program);
 		case "String":
-			return `z.literal("${type.value}")`;
+			return literalSchema(type.value);
+		case "EnumMember":
+			return literalSchema(type.value ?? type.name);
 		case "Number":
 			return `z.literal(${type.value})`;
 		case "Boolean":
@@ -566,6 +568,10 @@ function generateTypeSchema(
 		default:
 			return "z.unknown()";
 	}
+}
+
+function literalSchema(value: string | number): string {
+	return `z.literal(${JSON.stringify(value)})`;
 }
 
 // Without these, a `null` variant falls through to z.unknown() and the union

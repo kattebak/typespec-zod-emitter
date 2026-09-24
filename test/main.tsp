@@ -201,6 +201,31 @@ model Dog extends Animal {
   status: "goodBoy";
 }
 
+enum Kind {
+	A: "A",
+	B: "B",
+}
+
+model Alpha {
+	kind: Kind.A;
+	a: string;
+}
+
+model Beta {
+	kind: Kind.B;
+	b: string;
+}
+
+@discriminated(#{ envelope: "none", discriminatorPropertyName: "kind" })
+union Shape {
+	A: Alpha,
+	B: Beta,
+}
+
+model ShapeList {
+	items: Shape[];
+}
+
 // Regression test: a model-typed property inherited from a base model must
 // still be tracked as a topological-sort dependency. `NestedBase` and
 // `NestedTarget` live in a namespace that is collected AFTER root-level
