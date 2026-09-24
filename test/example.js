@@ -530,6 +530,23 @@ describe("zod schema smoke tests", () => {
 		);
 	});
 
+	it("pins an enum member property to its literal value", () => {
+		const parsed = Schemas.ShapeListSchema.parse({
+			items: [
+				{ kind: "A", a: "x" },
+				{ kind: "B", b: "y" },
+			],
+		});
+		assert.deepEqual(parsed.items, [
+			{ kind: "A", a: "x" },
+			{ kind: "B", b: "y" },
+		]);
+		assert.throws(() =>
+			Schemas.ShapeListSchema.parse({ items: [{ kind: "B", a: "x" }] }),
+		);
+		assert.throws(() => Schemas.AlphaSchema.parse({ a: "x" }));
+	});
+
 	it("leaves a name that collides with nothing unqualified", () => {
 		assert.equal(Schemas.ShelterShelfSchema, undefined);
 		assert.equal(Schemas.ShelfSchema.parse({ label: "top" }).label, "top");
