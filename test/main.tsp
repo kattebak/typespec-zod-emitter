@@ -498,3 +498,19 @@ namespace Aviary {
     pet: Pet;
   }
 }
+
+model BoundedArray {
+  @minItems(1)
+  @maxItems(2)
+  values: string[];
+
+  @minItems(1)
+  @maxItems(3)
+  labels?: string[];
+}
+
+namespace Widgets {
+  @route("/bounded")
+  @post
+  op createBounded(@body payload: BoundedArray): BoundedArray;
+}

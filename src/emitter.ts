@@ -4,8 +4,10 @@ import {
 	emitFile,
 	getDiscriminatedUnion,
 	getFormat,
+	getMaxItems,
 	getMaxLength,
 	getMaxValue,
+	getMinItems,
 	getMinLength,
 	getMinValue,
 	getPattern,
@@ -535,6 +537,10 @@ function generatePropertySchema(
 			? generateScalarSchema(prop.type, program, prop)
 			: generateTypeSchema(prop.type, schemaNames, program);
 
+	if (program && prop.type.kind === "Model" && prop.type.name === "Array") {
+		schema = applyConstraints(schema, readConstraints(program, prop));
+	}
+
 	if (prop.optional) {
 		schema += ".optional()";
 	}
@@ -620,6 +626,8 @@ const FORMAT_CHECK_MAP = new Map<string, string>([
 interface Constraints {
 	minLength?: number;
 	maxLength?: number;
+	minItems?: number;
+	maxItems?: number;
 	pattern?: string;
 	format?: string;
 	minValue?: number;
@@ -630,6 +638,8 @@ function readConstraints(program: Program, target: Type): Constraints {
 	return {
 		minLength: getMinLength(program, target),
 		maxLength: getMaxLength(program, target),
+		minItems: getMinItems(program, target),
+		maxItems: getMaxItems(program, target),
 		pattern: getPattern(program, target),
 		format: getFormat(program, target),
 		minValue: getMinValue(program, target),
@@ -712,6 +722,15 @@ function applyConstraints(schema: string, constraints: Constraints): string {
 		}
 		if (constraints.maxValue !== undefined) {
 			checks.push(`.max(${constraints.maxValue})`);
+		}
+	}
+
+	if (schema.startsWith("z.array(")) {
+		if (constraints.minItems !== undefined) {
+			checks.push(`.min(${constraints.minItems})`);
+		}
+		if (constraints.maxItems !== undefined) {
+			checks.push(`.max(${constraints.maxItems})`);
 		}
 	}
 

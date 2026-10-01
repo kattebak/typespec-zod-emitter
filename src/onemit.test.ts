@@ -103,6 +103,49 @@ describe("$onEmit", () => {
 		assert.deepEqual([...files.keys()].sort(), ["middleware.ts", "schemas.ts"]);
 	});
 
+	it("emits maxItems constraints on array properties", async () => {
+		const files = await emit(`
+			model BoundedList {
+				@maxItems(5)
+				values: string[];
+			}
+		`);
+
+		assert.match(
+			files.get("schemas.ts") ?? "",
+			/values: z\.array\(z\.string\(\)\)\.max\(5\)$/m,
+		);
+	});
+
+	it("emits minItems constraints on array properties", async () => {
+		const files = await emit(`
+			model NonEmptyList {
+				@minItems(1)
+				values: string[];
+			}
+		`);
+
+		assert.match(
+			files.get("schemas.ts") ?? "",
+			/values: z\.array\(z\.string\(\)\)\.min\(1\)$/m,
+		);
+	});
+
+	it("emits minItems and maxItems together on array properties", async () => {
+		const files = await emit(`
+			model RangedList {
+				@minItems(1)
+				@maxItems(5)
+				values: string[];
+			}
+		`);
+
+		assert.match(
+			files.get("schemas.ts") ?? "",
+			/values: z\.array\(z\.string\(\)\)\.min\(1\)\.max\(5\)$/m,
+		);
+	});
+
 	it("skips the middleware when emit-middleware is false", async () => {
 		const files = await emit(petStore, {
 			...packageOptions,

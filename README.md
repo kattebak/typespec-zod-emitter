@@ -337,9 +337,15 @@ option turns the whole output file off.
 ### Constraints
 
 - `@minLength` / `@maxLength` → `.min()` / `.max()`
+- `@minItems` → array `.min()`
+- `@maxItems` → array `.max()`
 - `@pattern` → `.regex()`
 - `@format` → `.uuid()`, `.url()` (also `uri`), `.email()`; any other format is ignored
 - `@minValue` / `@maxValue` → `.min()` / `.max()`
+
+Item limits apply only to a property typed as an array: a union that contains one,
+such as `string[] | null`, gets no bound. A property typed as a named array model,
+such as `model Tags is string[]`, gets no bound either.
 
 Constraints declared on a scalar apply to every property typed with it, and a
 property can narrow them:
