@@ -146,6 +146,46 @@ describe("$onEmit", () => {
 		);
 	});
 
+	it("bounds an array in a request body whose element type varies by visibility", async () => {
+		const files = await emit(`
+			import "@typespec/http";
+			using Http;
+
+			@service
+			namespace Kennels;
+
+			model Pup {
+				@visibility(Lifecycle.Read)
+				pupId: string;
+
+				name: string;
+			}
+
+			model Litter {
+				@maxItems(2)
+				pups: Pup[];
+
+				@minItems(1)
+				@maxItems(3)
+				runts?: Pup[];
+			}
+
+			@route("/litters")
+			@post
+			op register(@body litter: Litter): Litter;
+		`);
+
+		const middleware = files.get("middleware.ts") ?? "";
+		assert.match(
+			middleware,
+			/pups: z\.array\(z\.object\(\{ name: z\.string\(\) \}\)\)\.max\(2\),/,
+		);
+		assert.match(
+			middleware,
+			/runts: z\.array\(z\.object\(\{ name: z\.string\(\) \}\)\)\.min\(1\)\.max\(3\)\.optional\(\)/,
+		);
+	});
+
 	it("skips the middleware when emit-middleware is false", async () => {
 		const files = await emit(petStore, {
 			...packageOptions,

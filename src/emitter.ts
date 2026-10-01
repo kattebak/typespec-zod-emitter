@@ -121,6 +121,8 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 							generateTypeSchema(type, schemaNames, context.program),
 						property: (property) =>
 							generatePropertySchema(property, schemaNames, context.program),
+						constrain: (property, schema) =>
+							applyPropertyConstraints(schema, property, context.program),
 						propertyName: quotePropertyName,
 						properties: getAllProperties,
 					},
@@ -537,8 +539,8 @@ function generatePropertySchema(
 			? generateScalarSchema(prop.type, program, prop)
 			: generateTypeSchema(prop.type, schemaNames, program);
 
-	if (program && prop.type.kind === "Model" && prop.type.name === "Array") {
-		schema = applyConstraints(schema, readConstraints(program, prop));
+	if (program) {
+		schema = applyPropertyConstraints(schema, prop, program);
 	}
 
 	if (prop.optional) {
@@ -546,6 +548,17 @@ function generatePropertySchema(
 	}
 
 	return schema;
+}
+
+function applyPropertyConstraints(
+	schema: string,
+	prop: ModelProperty,
+	program: Program,
+): string {
+	if (prop.type.kind !== "Model" || prop.type.name !== "Array") {
+		return schema;
+	}
+	return applyConstraints(schema, readConstraints(program, prop));
 }
 
 function generateTypeSchema(

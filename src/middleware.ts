@@ -12,6 +12,7 @@ import {
 export interface ZodCodegen {
 	type(type: Type): string;
 	property(property: ModelProperty): string;
+	constrain(property: ModelProperty, schema: string): string;
 	propertyName(name: string): string;
 	properties(model: Model): Map<string, ModelProperty>;
 }
@@ -278,7 +279,10 @@ function payloadPropertySchema(
 		return optional && !property.optional ? `${declared}.optional()` : declared;
 	}
 
-	const schema = payloadSchema(property.type, visibility, context);
+	const schema = context.codegen.constrain(
+		property,
+		payloadSchema(property.type, visibility, context),
+	);
 	return optional ? `${schema}.optional()` : schema;
 }
 
