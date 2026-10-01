@@ -17,6 +17,7 @@ const codegen = {
 	type: (type: Type) => `<${(type as Model).name}>`,
 	property: (property: ModelProperty) =>
 		`z.string()${property.optional ? ".optional()" : ""}`,
+	constrain: (_property: ModelProperty, schema: string) => schema,
 	propertyName: (name: string) =>
 		/^[a-zA-Z_$]\w*$/.test(name) ? name : `"${name}"`,
 	properties: (model: Model) => model.properties,

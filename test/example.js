@@ -582,7 +582,7 @@ describe("request validation middleware smoke tests", () => {
 		const update = findOperation("PATCH", `${BASE_PATH}/widgets/widget-1`);
 		const list = findOperation("get", `${BASE_PATH}/widgets?status=Active`);
 
-		assert.equal(operations.length, 16);
+		assert.equal(operations.length, 17);
 		assert.equal(create.operationId, "Widgets_create");
 		assert.equal(update.operationId, "Widgets_update");
 		assert.equal(list.operationId, "Widgets_list");
@@ -693,6 +693,30 @@ describe("request validation middleware smoke tests", () => {
 		await assert.rejects(() => validationMiddleware.pre(outOfRange), {
 			name: "RequestValidationError",
 		});
+	});
+
+	it("bounds a request body array whose element type varies by visibility", async () => {
+		const crate = { label: "crate" };
+		const valid = request("POST", "/widgets/bounded-crates", {
+			crates: [crate, crate],
+		});
+		const tooMany = request("POST", "/widgets/bounded-crates", {
+			crates: [crate, crate, crate],
+		});
+
+		assert.equal(await validationMiddleware.pre(valid), undefined);
+		await assert.rejects(
+			() => validationMiddleware.pre(tooMany),
+			(error) => {
+				assert.equal(error.name, "RequestValidationError");
+				assert.equal(error.operationId, "Widgets_createBoundedCrates");
+				assert.equal(
+					error.issues.some((issue) => issue.path.join(".") === "crates"),
+					true,
+				);
+				return true;
+			},
+		);
 	});
 
 	it("ignores requests it has no schema for", async () => {

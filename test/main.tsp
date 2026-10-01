@@ -509,8 +509,24 @@ model BoundedArray {
   labels?: string[];
 }
 
+model Crate {
+  @visibility(Lifecycle.Read)
+  crateId: string;
+
+  label: string;
+}
+
+model BoundedCrates {
+  @maxItems(2)
+  crates: Crate[];
+}
+
 namespace Widgets {
   @route("/bounded")
   @post
   op createBounded(@body payload: BoundedArray): BoundedArray;
+
+  @route("/bounded-crates")
+  @post
+  op createBoundedCrates(@body payload: BoundedCrates): BoundedCrates;
 }
