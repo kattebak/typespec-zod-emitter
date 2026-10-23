@@ -427,7 +427,7 @@ function generateEnumSchema(enumType: Enum, schemaNames?: SchemaNames): string {
 
 	const values = members.map((member) => {
 		const value = member.value ?? member.name;
-		return typeof value === "string" ? `"${value}"` : value;
+		return typeof value === "string" ? JSON.stringify(value) : value;
 	});
 
 	return `export const ${name}Schema = z.enum([${values.join(", ")}]);`;
@@ -492,7 +492,7 @@ function isReservedWord(name: string): boolean {
 }
 
 function quotePropertyName(name: string): string {
-	return isValidJavaScriptIdentifier(name) ? name : `"${name}"`;
+	return isValidJavaScriptIdentifier(name) ? name : JSON.stringify(name);
 }
 
 function getAllProperties(model: Model): Map<string, ModelProperty> {

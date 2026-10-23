@@ -10,6 +10,7 @@ import type {
 	Type,
 	Union,
 } from "@typespec/compiler";
+import { z } from "zod";
 import { __test } from "./emitter.js";
 
 type ModelLike = Model & { kind: "Model" };
@@ -18,7 +19,46 @@ function dependencyNames(dependencies: Set<Model | Enum>): Set<string> {
 	return new Set([...dependencies].map((dependency) => dependency.name));
 }
 
+function evaluateSchema(source: string): z.ZodTypeAny {
+	const expression = source
+		.replace(/^export const \w+ = /, "")
+		.replace(/;$/, "");
+	return new Function("z", `return ${expression}`)(z);
+}
+
 describe("emitter helpers", () => {
+	it("escapes string literals so backslashes and quotes survive", () => {
+		const seen = "\\Seen";
+		const quoted = 'say "hi"';
+		const flagEnum = {
+			name: "Flag",
+			members: new Map([
+				["Seen", { name: "Seen", value: seen }],
+				["Quoted", { name: "Quoted", value: quoted }],
+			]),
+		} as unknown as Enum;
+
+		const enumSchema = evaluateSchema(__test.generateEnumSchema(flagEnum));
+		assert.equal(enumSchema.parse(seen), seen);
+		assert.equal(enumSchema.parse(quoted), quoted);
+		assert.equal(enumSchema.safeParse("Seen").success, false);
+
+		const literalSchema = evaluateSchema(
+			__test.generateTypeSchema({
+				kind: "String",
+				value: seen,
+			} as unknown as Type),
+		);
+		assert.equal(literalSchema.parse(seen), seen);
+		assert.equal(literalSchema.safeParse("Seen").success, false);
+
+		const key = 'a\\b"c';
+		const objectSchema = evaluateSchema(
+			`z.object({ ${__test.quotePropertyName(key)}: z.string() })`,
+		);
+		assert.deepEqual(objectSchema.parse({ [key]: "v" }), { [key]: "v" });
+	});
+
 	it("validates identifiers and quotes invalid names", () => {
 		assert.equal(__test.isValidJavaScriptIdentifier("validName"), true);
 		assert.equal(__test.isValidJavaScriptIdentifier("_valid"), true);
