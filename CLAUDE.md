@@ -11,7 +11,7 @@ A TypeSpec compiler emitter that generates Zod validation schemas from TypeSpec 
 - `npm run test:unit` — unit tests only (`node --test --import=tsx src/**/*.test.ts`)
 - `npm run test:emit` — compile test TypeSpec definitions (`tsp compile test/main.tsp --config test/tspconfig.yaml`)
 - `npm run test:package` — emit, then type-check the emitted package (`tsc -p build/zod-schemas`)
-- `npm run test:example` — smoke tests against emitted output (`node --test test/example.js`)
+- `npm run test:example` — type-check and smoke-test the emitted output against zod 3 and zod 4 (`node test/zod-matrix.js`)
 
 ## Architecture
 

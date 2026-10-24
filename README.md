@@ -17,19 +17,18 @@ A custom TypeSpec emitter that generates Zod validators for TypeSpec models usin
 ## Installation
 
 ```bash
-npm install typespec-zod-emitter zod@^3.23.0
+npm install typespec-zod-emitter zod
 ```
 
 ## Zod compatibility
 
-The emitter targets **zod 3**, and both the emitter and every generated package
-declare the peer range `^3.23.0`.
+The emitter and every generated package declare the peer range
+`^3.23.0 || ^4.0.0`.
 
-The generated schemas call the string format checks `.url()` and `.datetime()`,
-which zod 4 removed, and `.date()` and `.time()`, which arrived in zod 3.23. So
-the range is capped below 4 and floored at 3.23. Emitting the zod 4 spellings
-instead would break every consumer on zod 3, which is why the range moves rather
-than the output.
+The generated schemas call `.date()` and `.time()`, which arrived in zod 3.23,
+and the string format checks `.url()`, `.email()`, `.uuid()` and `.datetime()`,
+which zod 4 deprecates but keeps. CI runs the emitted fixtures against both
+majors.
 
 ## Usage
 
@@ -179,7 +178,7 @@ When both `package-name` and `package-version` are provided, a complete npm pack
     "prepare": "tsc"
   },
   "peerDependencies": {
-    "zod": "^3.23.0"
+    "zod": "^3.23.0 || ^4.0.0"
   },
   "devDependencies": {
     "typescript": "^5.0.0"

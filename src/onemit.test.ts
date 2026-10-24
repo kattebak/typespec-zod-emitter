@@ -245,18 +245,17 @@ describe("$onEmit", () => {
 		assert.match(files.get("README.md") ?? "", /@petstore\/schemas\/guard/);
 	});
 
-	it("pins the generated package to a zod 3 peer range", async () => {
+	it("declares a zod 3 and zod 4 peer range on the generated package", async () => {
 		const files = await emit(petStore, packageOptions);
 
 		assert.match(files.get("schemas.ts") ?? "", /z\.string\(\)\.url\(\)/);
 
 		const manifest = JSON.parse(files.get("package.json") ?? "{}");
 		assert.equal(manifest.peerDependencies.zod, __test.ZOD_PEER_RANGE);
-		assert.match(__test.ZOD_PEER_RANGE, /^\^3\./);
+		assert.equal(__test.ZOD_PEER_RANGE, "^3.23.0 || ^4.0.0");
 
 		const readme = files.get("README.md") ?? "";
-		assert.ok(readme.includes(`zod@${__test.ZOD_PEER_RANGE}`));
-		assert.ok(readme.includes("Zod 4 is not"));
+		assert.ok(readme.includes(__test.ZOD_PEER_RANGE));
 	});
 
 	it("declares the same zod range for the emitter itself", async () => {
@@ -265,7 +264,8 @@ describe("$onEmit", () => {
 		);
 
 		assert.equal(manifest.peerDependencies.zod, __test.ZOD_PEER_RANGE);
-		assert.equal(manifest.devDependencies.zod, __test.ZOD_PEER_RANGE);
+		assert.equal(manifest.devDependencies.zod3, "npm:zod@^3.23.0");
+		assert.equal(manifest.devDependencies.zod4, "npm:zod@^4.0.0");
 	});
 });
 
