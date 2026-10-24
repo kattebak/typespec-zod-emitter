@@ -552,7 +552,11 @@ describe("zod schema smoke tests", () => {
 		for (const item of [{ a: "x" }, { kind: "C", a: "x" }]) {
 			const result = Schemas.ShapeListSchema.safeParse({ items: [item] });
 			assert.equal(result.success, false);
-			assert.equal(result.error.issues[0].code, "invalid_union_discriminator");
+			// zod 3 reports invalid_union_discriminator, zod 4 invalid_union.
+			assert.match(
+				result.error.issues[0].code,
+				/^invalid_union(_discriminator)?$/,
+			);
 			assert.deepEqual(result.error.issues[0].path, ["items", 0, "kind"]);
 		}
 	});

@@ -24,9 +24,9 @@ import { $ } from "@typespec/compiler/typekit";
 import { reportDiagnostic, type ZodEmitterOptions } from "./lib.js";
 import { generateMiddleware } from "./middleware.js";
 
-// Emitted schemas call z.string().date()/.time(), added in zod 3.23, and
-// .url()/.datetime(), dropped in zod 4.
-const ZOD_PEER_RANGE = "^3.23.0";
+// Emitted schemas call z.string().date()/.time(), added in zod 3.23. The
+// string format checks are deprecated in zod 4 but still present.
+const ZOD_PEER_RANGE = "^3.23.0 || ^4.0.0";
 
 type DeclaredType = Model | Enum;
 type SchemaNames = ReadonlyMap<DeclaredType, string>;
@@ -1010,12 +1010,11 @@ Auto-generated Zod schemas from TypeSpec definitions.
 ## Installation
 
 \`\`\`bash
-npm install ${packageName} zod@${ZOD_PEER_RANGE}
+npm install ${packageName} zod
 \`\`\`
 
-The schemas use the zod 3 string format checks \`.url()\`, \`.datetime()\`,
-\`.date()\` and \`.time()\`, so the peer range is \`${ZOD_PEER_RANGE}\`. Zod 4 is not
-supported.
+The schemas run on zod 3.23 and later and on zod 4; the peer range is
+\`${ZOD_PEER_RANGE}\`.
 
 ## Usage
 
