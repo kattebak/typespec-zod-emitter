@@ -955,3 +955,51 @@ describe("array constraint smoke tests", () => {
 		}
 	});
 });
+
+describe("recursive schemas", () => {
+	const rule = {
+		version: 1,
+		test: {
+			test: "allof",
+			tests: [
+				{ test: "header", match: "Is", key: "ada@example.com" },
+				{
+					test: "not",
+					operand: {
+						test: "anyof",
+						tests: [
+							{ test: "hasWords", words: ["invoice"] },
+							{
+								test: "not",
+								operand: { test: "header", match: "Contains", key: "x" },
+							},
+						],
+					},
+				},
+			],
+		},
+	};
+
+	it("parses a rule nested through every recursive variant", () => {
+		assert.deepEqual(Schemas.RuleV1Schema.parse(rule), rule);
+	});
+
+	it("rejects an invalid leaf deep inside the tree", () => {
+		const invalid = structuredClone(rule);
+		invalid.test.tests[1].operand.tests[1].operand.match = "Regex";
+		assert.equal(Schemas.RuleV1Schema.safeParse(invalid).success, false);
+	});
+
+	it("parses a self-referencing model", () => {
+		const tree = {
+			label: "root",
+			children: [{ label: "leaf", children: [] }],
+		};
+		assert.deepEqual(Schemas.TreeNodeSchema.parse(tree), tree);
+		assert.equal(
+			Schemas.TreeNodeSchema.safeParse({ label: "root", children: [{}] })
+				.success,
+			false,
+		);
+	});
+});

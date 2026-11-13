@@ -786,6 +786,60 @@ describe("emitter helpers", () => {
 		assert.ok(sorted.indexOf(aviaryPet) < sorted.indexOf(adoption));
 	});
 
+	it("orders a cycle after its dependencies and marks only its members cyclic", () => {
+		const leaf = {
+			kind: "Model",
+			name: "Leaf",
+			properties: new Map(),
+		} as unknown as Model;
+		const not = {
+			kind: "Model",
+			name: "Not",
+			properties: new Map(),
+		} as unknown as Model;
+		const all = {
+			kind: "Model",
+			name: "All",
+			properties: new Map(),
+		} as unknown as Model;
+		const test = {
+			kind: "Union",
+			variants: new Map([
+				["all", { type: all }],
+				["not", { type: not }],
+				["leaf", { type: leaf }],
+			]),
+		} as unknown as Type;
+		const list = {
+			kind: "Model",
+			name: "Array",
+			indexer: { key: { name: "integer" }, value: test },
+			properties: new Map(),
+		} as unknown as Model;
+		all.properties.set("tests", {
+			type: list,
+			optional: false,
+		} as unknown as ModelProperty);
+		not.properties.set("operand", {
+			type: test,
+			optional: false,
+		} as unknown as ModelProperty);
+		const rule = {
+			kind: "Model",
+			name: "Rule",
+			properties: new Map([
+				["test", { type: test, optional: false } as unknown as ModelProperty],
+			]),
+		} as unknown as Model;
+
+		const { sorted, cyclic } = __test.orderSchemas([rule, all, not, leaf]);
+
+		assert.deepEqual(new Set(cyclic), new Set([all, not]));
+		assert.equal(sorted.at(-1), rule);
+		assert.ok(sorted.indexOf(leaf) < sorted.indexOf(all));
+		assert.ok(sorted.indexOf(leaf) < sorted.indexOf(not));
+	});
+
 	// === assignSchemaNames ===
 
 	it("keeps declared names when nothing collides", () => {

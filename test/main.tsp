@@ -530,3 +530,53 @@ namespace Widgets {
   @post
   op createBoundedCrates(@body payload: BoundedCrates): BoundedCrates;
 }
+
+enum RuleMatch {
+  Is: "Is",
+  Contains: "Contains",
+}
+
+model AllOfTest {
+  test: "allof";
+  tests: RuleTest[];
+}
+
+model AnyOfTest {
+  test: "anyof";
+  tests: RuleTest[];
+}
+
+model NotTest {
+  test: "not";
+  operand: RuleTest;
+}
+
+model HeaderTest {
+  test: "header";
+  match: RuleMatch;
+  key: string;
+}
+
+model WordsTest {
+  test: "hasWords";
+  words: string[];
+}
+
+union RuleTest {
+  allof: AllOfTest,
+  anyof: AnyOfTest,
+  not: NotTest,
+  header: HeaderTest,
+  hasWords: WordsTest,
+}
+
+model RuleV1 {
+  version: 1;
+  test: RuleTest;
+}
+
+model TreeNode {
+  label: string;
+  children: TreeNode[];
+  parent?: TreeNode;
+}
