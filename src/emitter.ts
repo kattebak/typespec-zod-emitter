@@ -299,17 +299,19 @@ function schemaName(type: DeclaredType, names?: SchemaNames): string {
 	return names?.get(type) ?? type.name;
 }
 
-function getModelDependencies(model: Model): Set<DeclaredType> {
+function referencedTypes(model: Model): Set<DeclaredType> {
 	const dependencies = new Set<DeclaredType>();
 
 	function extractDependencies(type: Type): void {
 		switch (type.kind) {
 			case "Model":
-				// Skip intrinsic models like Array, Record
-				if (!isIntrinsicModel(type) && type.name) {
+				if (isAnonymousModel(type)) {
+					for (const prop of type.properties.values()) {
+						extractDependencies(prop.type);
+					}
+				} else if (!isIntrinsicModel(type)) {
 					dependencies.add(type);
 				}
-				// Check indexer for Record types
 				if (type.indexer?.value) {
 					extractDependencies(type.indexer.value);
 				}
@@ -327,56 +329,104 @@ function getModelDependencies(model: Model): Set<DeclaredType> {
 		}
 	}
 
-	// Extract dependencies from all properties, including those inherited
-	// from a base model — the emitted schema inlines inherited property
-	// references too, so the topological sort must see them.
+	// Inherited properties count: the emitted schema inlines them too.
 	for (const [_, prop] of getAllProperties(model)) {
 		extractDependencies(prop.type);
 	}
 
-	// Remove self-reference
-	dependencies.delete(model);
-
 	return dependencies;
 }
 
+function getModelDependencies(model: Model): Set<DeclaredType> {
+	const dependencies = referencedTypes(model);
+	dependencies.delete(model);
+	return dependencies;
+}
+
+function isAnonymousModel(model: Model): boolean {
+	return !model.name || model.name === "object";
+}
+
+interface SchemaOrder {
+	sorted: Model[];
+	cyclic: Set<Model>;
+}
+
+// Tarjan's algorithm: each strongly connected component is emitted after every
+// component it depends on, so an acyclic graph keeps its depth-first order and
+// only references inside a cycle point at a schema that is not yet defined.
 // Dependencies are tracked by type identity, not by name: two models declared
-// in different namespaces can share a name, and only identity says which one a
-// property actually refers to.
-function topologicalSort(models: Model[]): Model[] {
+// in different namespaces can share a name.
+function orderSchemas(models: Model[]): SchemaOrder {
 	const declared = new Set(models);
-	const visited = new Set<Model>();
-	const visiting = new Set<Model>();
+	const index = new Map<Model, number>();
+	const lowLink = new Map<Model, number>();
+	const stack: Model[] = [];
+	const onStack = new Set<Model>();
 	const sorted: Model[] = [];
+	const cyclic = new Set<Model>();
+
+	function dependenciesOf(model: Model): Model[] {
+		return [...referencedTypes(model)].filter(
+			(dependency): dependency is Model =>
+				dependency.kind === "Model" && declared.has(dependency),
+		);
+	}
 
 	function visit(model: Model): void {
-		if (visited.has(model) || !declared.has(model)) {
-			return;
-		}
+		index.set(model, index.size);
+		lowLink.set(model, index.get(model) ?? 0);
+		stack.push(model);
+		onStack.add(model);
 
-		if (visiting.has(model)) {
-			// Circular dependency detected - skip to avoid infinite loop
-			return;
-		}
-
-		visiting.add(model);
-
-		for (const dependency of getModelDependencies(model)) {
-			if (dependency.kind === "Model") {
+		const dependencies = dependenciesOf(model);
+		for (const dependency of dependencies) {
+			if (!index.has(dependency)) {
 				visit(dependency);
+				lowLink.set(
+					model,
+					Math.min(lowLink.get(model) ?? 0, lowLink.get(dependency) ?? 0),
+				);
+			} else if (onStack.has(dependency)) {
+				lowLink.set(
+					model,
+					Math.min(lowLink.get(model) ?? 0, index.get(dependency) ?? 0),
+				);
 			}
 		}
 
-		visiting.delete(model);
-		visited.add(model);
-		sorted.push(model);
+		if (lowLink.get(model) !== index.get(model)) {
+			return;
+		}
+
+		const component: Model[] = [];
+		for (let member = stack.pop(); member; member = stack.pop()) {
+			onStack.delete(member);
+			component.unshift(member);
+			if (member === model) {
+				break;
+			}
+		}
+
+		if (component.length > 1 || dependencies.includes(model)) {
+			for (const member of component) {
+				cyclic.add(member);
+			}
+		}
+		sorted.push(...component);
 	}
 
 	for (const model of models) {
-		visit(model);
+		if (!index.has(model)) {
+			visit(model);
+		}
 	}
 
-	return sorted;
+	return { sorted, cyclic };
+}
+
+function topologicalSort(models: Model[]): Model[] {
+	return orderSchemas(models).sorted;
 }
 
 function generateZodSchemas(
@@ -401,15 +451,25 @@ function generateZodSchemas(
 		header += " */\n\n";
 	}
 
-	// Sort models topologically to ensure dependencies come first
-	const sortedModels = topologicalSort(models);
+	const { sorted, cyclic } = orderSchemas(models);
 
 	const enumSchemas = enums
 		.map((enumType) => generateEnumSchema(enumType, schemaNames))
 		.join("\n\n");
 
-	const modelSchemas = sortedModels
-		.map((model) => generateModelSchema(model, schemaNames, program))
+	const pending = new Set(sorted);
+	const modelSchemas = sorted
+		.map((model) => {
+			const schema = generateModelSchema(
+				model,
+				schemaNames,
+				program,
+				pending,
+				cyclic,
+			);
+			pending.delete(model);
+			return schema;
+		})
 		.join("\n\n");
 
 	return (
@@ -512,32 +572,141 @@ function generateModelSchema(
 	model: Model,
 	schemaNames?: SchemaNames,
 	program?: Program,
+	pending?: ReadonlySet<Model>,
+	cyclic?: ReadonlySet<Model>,
 ): string {
 	const properties: string[] = [];
 
 	for (const [propName, prop] of getAllProperties(model)) {
-		const zodType = generatePropertySchema(prop, schemaNames, program);
+		const zodType = generatePropertySchema(prop, schemaNames, program, pending);
 		const quotedName = quotePropertyName(propName);
 		properties.push(`\t${quotedName}: ${zodType}`);
 	}
 
 	const schemaBody =
 		properties.length > 0 ? `{\n${properties.join(",\n")}\n}` : "{}";
+	const name = schemaName(model, schemaNames);
 
-	return `export const ${schemaName(model, schemaNames)}Schema = z.object(${schemaBody});`;
+	if (!cyclic?.has(model)) {
+		return `export const ${name}Schema = z.object(${schemaBody});`;
+	}
+
+	// A schema that refers to itself has no inferable type, so it is annotated
+	// with a declared type instead.
+	const declaredType = generateObjectType(
+		getAllProperties(model),
+		schemaNames,
+		cyclic,
+	);
+	return `export type ${name} = ${declaredType};\n\nexport const ${name}Schema: z.ZodType<${name}> = z.object(${schemaBody});`;
+}
+
+function generateObjectType(
+	properties: ReadonlyMap<string, ModelProperty>,
+	schemaNames?: SchemaNames,
+	cyclic?: ReadonlySet<Model>,
+): string {
+	const members = [...properties].map(([propName, prop]) => {
+		const type = generateTypeScriptType(prop.type, schemaNames, cyclic);
+		// zod 3 infers a key holding unknown as optional.
+		const optional = prop.optional || type === "unknown" ? "?" : "";
+		return `${quotePropertyName(propName)}${optional}: ${type}`;
+	});
+	return members.length > 0 ? `{ ${members.join("; ")} }` : "{}";
+}
+
+function generateTypeScriptType(
+	type: Type,
+	schemaNames?: SchemaNames,
+	cyclic?: ReadonlySet<Model>,
+): string {
+	switch (type.kind) {
+		case "Scalar":
+			return scalarTypeScriptType(type);
+		case "Model":
+			return modelTypeScriptType(type, schemaNames, cyclic);
+		case "Enum":
+			return `z.infer<typeof ${schemaName(type, schemaNames)}Schema>`;
+		case "Union": {
+			const variants = [...type.variants.values()].map((variant) =>
+				generateTypeScriptType(variant.type, schemaNames, cyclic),
+			);
+			return variants.length > 0 ? variants.join(" | ") : "never";
+		}
+		case "String":
+			return JSON.stringify(type.value);
+		case "EnumMember":
+			return JSON.stringify(type.value ?? type.name);
+		case "Number":
+		case "Boolean":
+			return String(type.value);
+		case "Intrinsic":
+			return INTRINSIC_SCHEMA_MAP.has(type.name) ? type.name : "unknown";
+		default:
+			return "unknown";
+	}
+}
+
+function modelTypeScriptType(
+	model: Model,
+	schemaNames?: SchemaNames,
+	cyclic?: ReadonlySet<Model>,
+): string {
+	if (model.name === "Array" && model.indexer?.value) {
+		return `Array<${generateTypeScriptType(model.indexer.value, schemaNames, cyclic)}>`;
+	}
+
+	if (model.indexer && model.indexer.key.name === "string") {
+		return `Record<string, ${generateTypeScriptType(model.indexer.value, schemaNames, cyclic)}>`;
+	}
+
+	if (isAnonymousModel(model)) {
+		return generateObjectType(model.properties, schemaNames, cyclic);
+	}
+
+	if (!schemaNames) {
+		return `z.infer<typeof ${model.name}Schema>`;
+	}
+
+	const declaredName = schemaNames.get(model);
+	if (!declaredName) {
+		return generateObjectType(model.properties, schemaNames, cyclic);
+	}
+
+	return cyclic?.has(model)
+		? declaredName
+		: `z.infer<typeof ${declaredName}Schema>`;
+}
+
+const SCALAR_TYPE_MAP = new Map<string, string>([
+	["z.string()", "string"],
+	["z.number()", "number"],
+	["z.boolean()", "boolean"],
+	["z.instanceof(Uint8Array)", "Uint8Array"],
+]);
+
+function scalarTypeScriptType(scalar: Scalar): string {
+	const schema = generateScalarSchema(scalar);
+	for (const [prefix, type] of SCALAR_TYPE_MAP) {
+		if (schema.startsWith(prefix)) {
+			return type;
+		}
+	}
+	return "unknown";
 }
 
 function generatePropertySchema(
 	prop: ModelProperty,
 	schemaNames?: SchemaNames,
 	program?: Program,
+	pending?: ReadonlySet<Model>,
 ): string {
 	// A property may narrow the constraints of its own scalar type, so the
 	// property itself is the last constraint source in the chain.
 	let schema =
 		prop.type.kind === "Scalar"
 			? generateScalarSchema(prop.type, program, prop)
-			: generateTypeSchema(prop.type, schemaNames, program);
+			: generateTypeSchema(prop.type, schemaNames, program, pending);
 
 	if (program) {
 		schema = applyPropertyConstraints(schema, prop, program);
@@ -565,16 +734,17 @@ function generateTypeSchema(
 	type: Type,
 	schemaNames?: SchemaNames,
 	program?: Program,
+	pending?: ReadonlySet<Model>,
 ): string {
 	switch (type.kind) {
 		case "Scalar":
 			return generateScalarSchema(type, program);
 		case "Model":
-			return generateModelTypeSchema(type, schemaNames, program);
+			return generateModelTypeSchema(type, schemaNames, program, pending);
 		case "Enum":
 			return `${schemaName(type, schemaNames)}Schema`;
 		case "Union":
-			return generateUnionSchema(type, schemaNames, program);
+			return generateUnionSchema(type, schemaNames, program, pending);
 		case "String":
 			return literalSchema(type.value);
 		case "EnumMember":
@@ -780,22 +950,28 @@ function generateModelTypeSchema(
 	model: Model,
 	schemaNames?: SchemaNames,
 	program?: Program,
+	pending?: ReadonlySet<Model>,
 ): string {
 	if (model.name === "Array" && model.indexer?.value) {
 		const elementType = model.indexer.value;
-		return `z.array(${generateTypeSchema(elementType, schemaNames, program)})`;
+		return `z.array(${generateTypeSchema(elementType, schemaNames, program, pending)})`;
 	}
 
 	if (model.indexer && model.indexer.key.name === "string") {
 		const valueType = model.indexer.value;
-		return `z.record(z.string(), ${generateTypeSchema(valueType, schemaNames, program)})`;
+		return `z.record(z.string(), ${generateTypeSchema(valueType, schemaNames, program, pending)})`;
 	}
 
 	// Handle anonymous object literals (inline object types)
 	if (!model.name || model.name === "" || model.name === "object") {
 		const properties: string[] = [];
 		for (const [propName, prop] of model.properties) {
-			const zodType = generatePropertySchema(prop, schemaNames, program);
+			const zodType = generatePropertySchema(
+				prop,
+				schemaNames,
+				program,
+				pending,
+			);
 			const quotedName = quotePropertyName(propName);
 			properties.push(`${quotedName}: ${zodType}`);
 		}
@@ -808,14 +984,21 @@ function generateModelTypeSchema(
 	if (schemaNames) {
 		const declaredName = schemaNames.get(model);
 		if (declaredName) {
-			return `${declaredName}Schema`;
+			return pending?.has(model)
+				? `z.lazy(() => ${declaredName}Schema)`
+				: `${declaredName}Schema`;
 		}
 
 		// Model is not in our declared models (e.g., lifecycle-transformed models like Create<T>)
 		// Generate it inline as an anonymous object
 		const properties: string[] = [];
 		for (const [propName, prop] of model.properties) {
-			const zodType = generatePropertySchema(prop, schemaNames, program);
+			const zodType = generatePropertySchema(
+				prop,
+				schemaNames,
+				program,
+				pending,
+			);
 			const quotedName = quotePropertyName(propName);
 			properties.push(`${quotedName}: ${zodType}`);
 		}
@@ -831,6 +1014,7 @@ function generateUnionSchema(
 	union: Union,
 	schemaNames?: SchemaNames,
 	program?: Program,
+	pending?: ReadonlySet<Model>,
 ): string {
 	const variants = Array.from(union.variants.values());
 
@@ -839,15 +1023,18 @@ function generateUnionSchema(
 	}
 
 	if (variants.length === 1) {
-		return generateTypeSchema(variants[0].type, schemaNames, program);
+		return generateTypeSchema(variants[0].type, schemaNames, program, pending);
 	}
 
 	const schemas = variants.map((variant) =>
-		generateTypeSchema(variant.type, schemaNames, program),
+		generateTypeSchema(variant.type, schemaNames, program, pending),
 	);
 
 	const discriminator = program && discriminatorProperty(program, union);
-	if (discriminator) {
+	if (
+		discriminator &&
+		!schemas.some((schema) => schema.startsWith("z.lazy("))
+	) {
 		return `z.discriminatedUnion(${JSON.stringify(discriminator)}, [${schemas.join(", ")}])`;
 	}
 
@@ -1088,12 +1275,14 @@ export const __test = {
 	generateScalarSchema,
 	generateTypeSchema,
 	generateUnionSchema,
+	generateTypeScriptType,
 	generateZodSchemas,
 	getAllProperties,
 	getModelDependencies,
 	isTemplateDeclaration,
 	isValidJavaScriptIdentifier,
 	mergeConstraints,
+	orderSchemas,
 	quotePropertyName,
 	toRegexLiteral,
 	topologicalSort,
