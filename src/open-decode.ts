@@ -27,7 +27,7 @@ type Decoded<S extends z.ZodType> = S extends { readonly [schemaKey]: infer K ex
 export function decode<S extends z.ZodType>(schema: S, value: unknown):
 	| { success: true; data: Decoded<S>; unrecognised: unknown[] }
 	| { success: false; error: z.ZodError } {
-	const key = (Object.keys(closed) as (keyof Closed)[]).find((key) => closed[key] === schema);
+	const key = (Object.keys(closed) as (keyof Closed)[]).find((key) => Object.is(closed[key], schema));
 	const result = (key === undefined ? schema : (opened ??= createSchemas(true))[key]).safeParse(value);
 	if (!result.success) return result;
 	const unrecognised: unknown[] = [];
