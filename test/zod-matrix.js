@@ -1,11 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const packageDir = fileURLToPath(
-	new URL("../build/zod-schemas", import.meta.url),
-);
+const packageName = process.argv[2] ?? "zod-schemas";
+const packageDir = join(root, "build", packageName);
+process.env.ZOD_SCHEMA_PACKAGE = packageName;
 const zodLink = `${packageDir}/node_modules/zod`;
 
 function run(command, args) {

@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import {
+
+const packageName = process.env.ZOD_SCHEMA_PACKAGE ?? "zod-schemas";
+const packageUrl = new URL(`../build/${packageName}/`, import.meta.url);
+const open = packageName === "zod-schemas-open";
+const {
 	createValidationMiddleware,
 	findOperation,
 	operations,
 	validationMiddleware,
-} from "../build/zod-schemas/middleware.js";
-import * as Schemas from "../build/zod-schemas/schemas.ts";
+} = await import(new URL("middleware.js", packageUrl));
+const Schemas = await import(new URL("schemas.ts", packageUrl));
 
 const validConstrained = {
 	id: "0123456789012345678901234",
@@ -434,7 +438,11 @@ describe("zod schema smoke tests", () => {
 		assert.throws(() => Schemas.TopSubSchema.parse({ ownField: "value" }));
 	});
 
-	it("validates declared unions in model properties", () => {
+	it("inlines declared unions by default and validates their references", () => {
+		if (!open) {
+			assert.equal("PetTagSchema" in Schemas, false);
+			assert.equal("FeedingScheduleSchema" in Schemas, false);
+		}
 		const collared = Schemas.TaggedPetSchema.parse({
 			petId: "pet-1",
 			tag: { material: "leather", sizeCm: 40 },
@@ -900,10 +908,7 @@ describe("array constraint smoke tests", () => {
 	});
 
 	it("bounds an optional array before marking it optional", () => {
-		const source = readFileSync(
-			new URL("../build/zod-schemas/schemas.ts", import.meta.url),
-			"utf8",
-		);
+		const source = readFileSync(new URL("schemas.ts", packageUrl), "utf8");
 
 		assert.match(
 			source,
@@ -1001,7 +1006,7 @@ describe("recursive schemas", () => {
 	});
 });
 
-it("decodes unknown wire values through generated schemas", () => {
+it("decodes unknown wire values", { skip: !open }, () => {
 	const { decode, WireBSchema, WireSchema, RuleTestSchema } = Schemas;
 	const row = { kind: "B", id: "w", status: "Retired", revision: 3 };
 	const extra = "Unrecognised";
@@ -1011,9 +1016,9 @@ it("decodes unknown wire values through generated schemas", () => {
 		data: { ...row, status: extra, revision: extra },
 		unrecognised: ["Retired", 3],
 	});
-	assert.deepEqual(decode(WireSchema, { kind: "C", id: "w", extra: 7 }), {
+	assert.deepEqual(decode(WireSchema, { kind: "C", id: "w", extra }), {
 		success: true,
-		data: { kind: extra, id: "w", extra: 7 },
+		data: { kind: extra, id: "w", extra },
 		unrecognised: ["C"],
 	});
 	assert.equal(decode(WireSchema, { kind: "A", id: "w" }).success, false);

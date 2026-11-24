@@ -38,6 +38,10 @@ const emitterOptionsSchema: JSONSchemaType<ZodEmitterOptions> = {
 export const $lib = createTypeSpecLibrary({
 	name: "@kattebak/typespec-zod-emitter",
 	diagnostics: {
+		"namespace-not-found": {
+			severity: "error",
+			messages: { default: paramMessage`Namespace "${"name"}" was not found.` },
+		},
 		"schema-name-qualified": {
 			severity: "warning",
 			messages: {

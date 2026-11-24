@@ -35,7 +35,7 @@ export function decode<S extends z.ZodType>(schema: S, value: unknown):
 	if (!result.success) return result;
 	const unrecognised: unknown[] = [];
 	function walk(input: unknown, output: unknown) {
-		if (output === "Unrecognised") unrecognised.push(input);
+		if (output === "Unrecognised" && input !== output) unrecognised.push(input);
 		if (input && output && typeof input === "object" && typeof output === "object") {
 			for (const key of Object.keys(output)) walk(Reflect.get(input, key), Reflect.get(output, key));
 		}
