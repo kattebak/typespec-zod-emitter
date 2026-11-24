@@ -1,5 +1,5 @@
 export const decodeRuntime = `type OpenValue<O extends boolean, T> = O extends true ? T : never;
-type UnknownVariant<K extends string> = Record<string, unknown> & Record<K, "Unrecognised">;
+type UnknownVariant<K extends string, B> = Record<string, unknown> & Record<K, "Unrecognised"> & B;
 type OpenSchema<O extends boolean, S extends z.ZodType, T> = O extends true ? z.ZodType<z.output<S> | T> : S;
 const unrecognisedValue = () => "Unrecognised" as const;
 function openSchema<O extends boolean, S extends z.ZodType, F extends z.ZodType>(open: O, schema: S, fallback: () => F) {
@@ -17,18 +17,20 @@ function openUnion<O extends boolean, S extends z.ZodType, K extends string, B e
 	}, z.lazy(() => {
 		const model = base?.() as { shape: z.ZodRawShape } | undefined;
 		return z.object({ ...model?.shape, [key]: z.literal("Unrecognised") }).passthrough();
-	})) as unknown as z.ZodType<UnknownVariant<K> & z.output<B>>);
+	})) as unknown as z.ZodType<UnknownVariant<K, z.output<B>>>);
 }
 let opened: ReturnType<typeof createSchemas<true>> | undefined;
+const getOpen = () => (opened ??= createSchemas(true));
 declare const schemaKey: unique symbol;
 type Closed = ReturnType<typeof createSchemas<false>>;
-type Decoded<S extends z.ZodType> = S extends { readonly [schemaKey]: infer K extends keyof Closed }
-	? z.output<NonNullable<typeof opened>[K]> : z.output<S>;
+type SchemaKey = Exclude<keyof typeof OpenSchemas, "prototype">;
+type Decoded<S extends z.ZodType> = S extends { readonly [schemaKey]: infer K extends SchemaKey }
+	? z.output<ReturnType<(typeof OpenSchemas)[K]>> : z.output<S>;
 export function decode<S extends z.ZodType>(schema: S, value: unknown):
 	| { success: true; data: Decoded<S>; unrecognised: unknown[] }
 	| { success: false; error: z.ZodError } {
-	const key = (Object.keys(closed) as (keyof Closed)[]).find((key) => Object.is(closed[key], schema));
-	const result = (key === undefined ? schema : (opened ??= createSchemas(true))[key]).safeParse(value);
+	const key = (Object.keys(closed) as SchemaKey[]).find((key) => Object.is(closed[key], schema));
+	const result = (key === undefined ? schema : OpenSchemas[key]()).safeParse(value);
 	if (!result.success) return result;
 	const unrecognised: unknown[] = [];
 	function walk(input: unknown, output: unknown) {

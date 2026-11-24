@@ -497,9 +497,10 @@ function generateZodSchemas(
 		(union) =>
 			`const ${schemaName(union, schemaNames)}Schema = ${generateUnionSchema(union, schemaNames, program, pending)};`,
 	);
-	const names = [...enums, ...sorted, ...unions]
-		.map((type) => `${schemaName(type, schemaNames)}Schema`)
-		.join(", ");
+	const nameOf = (t: DeclaredType) => `${schemaName(t, schemaNames)}Schema`;
+	const names = [...enums, ...sorted, ...unions].map(nameOf);
+	// Separate methods let TypeScript serialize each schema independently.
+	const readers = names.map((n) => `static ${n}() { return getOpen().${n}; }`);
 	const openNames = Object.assign(new Map(schemaNames), { open: program });
 	const aliases = [...cyclic].map((model) => {
 		const name = schemaName(model, schemaNames);
@@ -508,20 +509,19 @@ function generateZodSchemas(
 	return `${imports}${header}${decodeRuntime}
 function createSchemas<Open extends boolean>(open: Open) {
 ${[definitions, ...unionSchemas].filter(Boolean).join("\n\n")}
-return { ${names} };
+return { ${names.join(", ")} };
 }
 const closed = createSchemas(false) as { [K in keyof Closed]: Closed[K] & { readonly [schemaKey]: K } };
-export const { ${names} } = closed;
+export const { ${names.join(", ")} } = closed;
+class OpenSchemas {
+${readers.join("\n")}
+}
 ${aliases.join("\n")}
 `;
 }
 
-function generateEnumSchema(
-	enumType: Enum,
-	schemaNames?: SchemaNames,
-	openDecode?: boolean,
-): string {
-	return `${openDecode ? "" : "export "}const ${schemaName(enumType, schemaNames)}Schema = ${enumExpression(enumType, openDecode)};`;
+function generateEnumSchema(type: Enum, names?: SchemaNames, open?: boolean) {
+	return `${open ? "" : "export "}const ${schemaName(type, names)}Schema = ${enumExpression(type, open)};`;
 }
 
 function enumExpression(enumType: Enum, openDecode?: boolean): string {
@@ -695,11 +695,11 @@ function generateTypeScriptType(
 			const key = openProgram && discriminatorProperty(openProgram, type);
 			if (key) {
 				const base = sharedBase(type, schemaNames);
-				const extra = base
-					? ` & ${generateTypeScriptType(base, schemaNames, cyclic)}`
-					: "";
+				const shared =
+					base && generateTypeScriptType(base, schemaNames, cyclic);
+				const tag = JSON.stringify(key);
 				variants.push(
-					`OpenValue<Open, UnknownVariant<${JSON.stringify(key)}>${extra}>`,
+					`OpenValue<Open, UnknownVariant<${tag}, ${shared ?? "{}"}>>`,
 				);
 			}
 			return variants.length > 0 ? variants.join(" | ") : "never";
