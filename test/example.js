@@ -434,10 +434,7 @@ describe("zod schema smoke tests", () => {
 		assert.throws(() => Schemas.TopSubSchema.parse({ ownField: "value" }));
 	});
 
-	it("inlines a declared union at every reference", () => {
-		assert.equal("PetTagSchema" in Schemas, false);
-		assert.equal("FeedingScheduleSchema" in Schemas, false);
-
+	it("validates declared unions in model properties", () => {
 		const collared = Schemas.TaggedPetSchema.parse({
 			petId: "pet-1",
 			tag: { material: "leather", sizeCm: 40 },
@@ -1002,4 +999,35 @@ describe("recursive schemas", () => {
 			false,
 		);
 	});
+});
+
+it("decodes unknown wire values through generated schemas", () => {
+	const { decode, WireBSchema, WireSchema, RuleTestSchema } = Schemas;
+	const row = { kind: "B", id: "w", status: "Retired", revision: 3 };
+	const extra = "Unrecognised";
+	assert.throws(() => WireBSchema.parse(row));
+	assert.equal(WireBSchema.safeParse(row).success, false);
+	assert.deepEqual(decode(WireBSchema, { ...row, extra }), {
+		success: true,
+		data: { ...row, status: extra, revision: extra },
+		unrecognised: ["Retired", 3],
+	});
+	assert.deepEqual(decode(WireSchema, { kind: "C", id: "w", extra: 7 }), {
+		success: true,
+		data: { kind: extra, id: "w", extra: 7 },
+		unrecognised: ["C"],
+	});
+	assert.equal(decode(WireSchema, { kind: "A", id: "w" }).success, false);
+	assert.equal(decode(WireSchema, { kind: "C", id: 1 }).success, false);
+	assert.equal(decode(WireBSchema, { ...row, revision: "3" }).success, false);
+	assert.deepEqual(
+		decode(RuleTestSchema, { test: "header", key: "x", match: "Regex" })
+			.unrecognised,
+		["Regex"],
+	);
+	assert.deepEqual(
+		decode(WireBSchema, { ...row, status: "Active", revision: 1, extra })
+			.unrecognised,
+		[],
+	);
 });

@@ -23,20 +23,32 @@ import {
 import { $ } from "@typespec/compiler/typekit";
 import { reportDiagnostic, type ZodEmitterOptions } from "./lib.js";
 import { generateMiddleware } from "./middleware.js";
+import { decodeRuntime } from "./open-decode.js";
 
 // Emitted schemas call z.string().date()/.time(), added in zod 3.23. The
 // string format checks are deprecated in zod 4 but still present.
 const ZOD_PEER_RANGE = "^3.23.0 || ^4.0.0";
 
-type DeclaredType = Model | Enum;
-type SchemaNames = ReadonlyMap<DeclaredType, string>;
+type DeclaredType = Model | Enum | Union;
+type SchemaNames = ReadonlyMap<DeclaredType, string> & {
+	filtered?: boolean;
+	open?: Program;
+};
+type Pending = ReadonlySet<Model> & { open?: boolean };
 
 export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 	const models: Model[] = [];
 	const enums: Enum[] = [];
+	const unions: Union[] = [];
+	const { namespace: filter, "open-decode": openDecode } = context.options;
 	const typekit = $(context.program);
 
 	function collectTypes(namespace: Namespace) {
+		if (openDecode && !isTypeSpecIntrinsic(namespace)) {
+			for (const union of namespace.unions.values()) {
+				if (union.name && typekit.type.isUserDefined(union)) unions.push(union);
+			}
+		}
 		for (const [_, model] of namespace.models) {
 			if (
 				!isIntrinsicModel(model) &&
@@ -62,22 +74,25 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 		}
 	}
 
-	const globalNamespace = context.program.getGlobalNamespaceType();
-	collectTypes(globalNamespace);
+	let root: Namespace | undefined = context.program.getGlobalNamespaceType();
+	for (const part of filter?.split(".") ?? [])
+		root = root?.namespaces.get(part);
+	if (root) collectTypes(root);
 
-	if (models.length === 0 && enums.length === 0) {
+	if (models.length === 0 && enums.length === 0 && unions.length === 0) {
 		return;
 	}
 
-	const declarations: DeclaredType[] = [...models, ...enums];
-	const { names: schemaNames, conflicts } = assignSchemaNames(declarations);
+	const declarations: DeclaredType[] = [...models, ...enums, ...unions];
+	const { names, conflicts } = assignSchemaNames(declarations);
+	const schemaNames = Object.assign(names, { filtered: !!filter });
 
 	for (const declaration of declarations) {
 		const name = schemaNames.get(declaration);
 		if (name && name !== declaration.name) {
 			reportDiagnostic(context.program, {
 				code: "schema-name-qualified",
-				format: { name: declaration.name, qualified: name },
+				format: { name: schemaName(declaration), qualified: name },
 				target: declaration,
 			});
 		}
@@ -86,7 +101,7 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 	for (const declaration of conflicts) {
 		reportDiagnostic(context.program, {
 			code: "duplicate-schema-name",
-			format: { name: schemaNames.get(declaration) ?? declaration.name },
+			format: { name: schemaName(declaration, schemaNames) },
 			target: declaration,
 		});
 	}
@@ -103,6 +118,7 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 		packageVersion,
 		schemaNames,
 		context.program,
+		openDecode ? unions : undefined,
 	);
 
 	await emitFile(context.program, {
@@ -260,6 +276,7 @@ function assignSchemaNames(types: readonly DeclaredType[]): {
 } {
 	const byDeclaredName = new Map<string, DeclaredType[]>();
 	for (const type of types) {
+		if (!type.name) continue;
 		const group = byDeclaredName.get(type.name);
 		if (group) {
 			group.push(type);
@@ -284,7 +301,7 @@ function assignSchemaNames(types: readonly DeclaredType[]): {
 	}
 
 	for (const type of types) {
-		const name = names.get(type) ?? type.name;
+		const name = schemaName(type, names);
 		if (taken.has(name)) {
 			conflicts.push(type);
 			continue;
@@ -296,7 +313,7 @@ function assignSchemaNames(types: readonly DeclaredType[]): {
 }
 
 function schemaName(type: DeclaredType, names?: SchemaNames): string {
-	return names?.get(type) ?? type.name;
+	return names?.get(type) ?? type.name ?? "";
 }
 
 function referencedTypes(model: Model): Set<DeclaredType> {
@@ -436,6 +453,7 @@ function generateZodSchemas(
 	packageVersion?: string,
 	schemaNames?: SchemaNames,
 	program?: Program,
+	unions?: Union[],
 ): string {
 	const imports = 'import { z } from "zod";\n\n';
 
@@ -454,10 +472,10 @@ function generateZodSchemas(
 	const { sorted, cyclic } = orderSchemas(models);
 
 	const enumSchemas = enums
-		.map((enumType) => generateEnumSchema(enumType, schemaNames))
+		.map((enumType) => generateEnumSchema(enumType, schemaNames, !!unions))
 		.join("\n\n");
 
-	const pending = new Set(sorted);
+	const pending = Object.assign(new Set(sorted), { open: !!unions });
 	const modelSchemas = sorted
 		.map((model) => {
 			const schema = generateModelSchema(
@@ -472,25 +490,57 @@ function generateZodSchemas(
 		})
 		.join("\n\n");
 
-	return (
-		imports + header + (enumSchemas ? `${enumSchemas}\n\n` : "") + modelSchemas
+	const definitions = (enumSchemas ? `${enumSchemas}\n\n` : "") + modelSchemas;
+	if (!unions) return imports + header + definitions;
+	for (const model of cyclic) pending.add(model);
+	const unionSchemas = unions.map(
+		(union) =>
+			`const ${schemaName(union, schemaNames)}Schema = ${generateUnionSchema(union, schemaNames, program, pending)};`,
 	);
+	const names = [...enums, ...sorted, ...unions]
+		.map((type) => `${schemaName(type, schemaNames)}Schema`)
+		.join(", ");
+	const openNames = Object.assign(new Map(schemaNames), { open: program });
+	const aliases = [...cyclic].map((model) => {
+		const name = schemaName(model, schemaNames);
+		return `type ${name}Output<Open extends boolean> = ${generateObjectType(getAllProperties(model), openNames, cyclic)};\nexport type ${name} = ${name}Output<false>;`;
+	});
+	return `${imports}${header}${decodeRuntime}
+function createSchemas<Open extends boolean>(open: Open) {
+${[definitions, ...unionSchemas].filter(Boolean).join("\n\n")}
+return { ${names} };
+}
+const closed = createSchemas(false) as { [K in keyof Closed]: Closed[K] & { readonly [schemaKey]: K } };
+export const { ${names} } = closed;
+${aliases.join("\n")}
+`;
 }
 
-function generateEnumSchema(enumType: Enum, schemaNames?: SchemaNames): string {
-	const members = Array.from(enumType.members.values());
-	const name = schemaName(enumType, schemaNames);
+function generateEnumSchema(
+	enumType: Enum,
+	schemaNames?: SchemaNames,
+	openDecode?: boolean,
+): string {
+	return `${openDecode ? "" : "export "}const ${schemaName(enumType, schemaNames)}Schema = ${enumExpression(enumType, openDecode)};`;
+}
 
-	if (members.length === 0) {
-		return `export const ${name}Schema = z.never();`;
-	}
+function enumExpression(enumType: Enum, openDecode?: boolean): string {
+	const values = enumValues(enumType);
+	if (!values.length) return "z.never()";
+	const enumSchema = `z.enum([${values.map((value) => JSON.stringify(value)).join(", ")}])`;
+	if (!openDecode) return enumSchema;
+	const kinds = [...new Set(values.map((value) => `z.${typeof value}()`))];
+	const numeric = kinds.includes("z.number()");
+	const schema = numeric ? zodUnion(values.map(literalSchema)) : enumSchema;
+	return `openSchema(open, ${schema}, () => ${zodUnion(kinds)}.transform(unrecognisedValue))`;
+}
 
-	const values = members.map((member) => {
-		const value = member.value ?? member.name;
-		return typeof value === "string" ? JSON.stringify(value) : value;
-	});
+function enumValues(type: Enum) {
+	return Array.from(type.members.values(), (m) => m.value ?? m.name);
+}
 
-	return `export const ${name}Schema = z.enum([${values.join(", ")}]);`;
+function zodUnion(schemas: string[]): string {
+	return schemas.length === 1 ? schemas[0] : `z.union([${schemas.join(", ")}])`;
 }
 
 function isValidJavaScriptIdentifier(name: string): boolean {
@@ -572,7 +622,7 @@ function generateModelSchema(
 	model: Model,
 	schemaNames?: SchemaNames,
 	program?: Program,
-	pending?: ReadonlySet<Model>,
+	pending?: Pending,
 	cyclic?: ReadonlySet<Model>,
 ): string {
 	const properties: string[] = [];
@@ -587,9 +637,12 @@ function generateModelSchema(
 		properties.length > 0 ? `{\n${properties.join(",\n")}\n}` : "{}";
 	const name = schemaName(model, schemaNames);
 
-	if (!cyclic?.has(model)) {
-		return `export const ${name}Schema = z.object(${schemaBody});`;
-	}
+	const exported = pending?.open ? "" : "export ";
+	if (!cyclic?.has(model))
+		return `${exported}const ${name}Schema = z.object(${schemaBody});`;
+
+	if (pending?.open)
+		return `const ${name}Schema = z.object(${schemaBody}) as unknown as z.ZodType<${name}Output<Open>>;`;
 
 	// A schema that refers to itself has no inferable type, so it is annotated
 	// with a declared type instead.
@@ -620,17 +673,35 @@ function generateTypeScriptType(
 	schemaNames?: SchemaNames,
 	cyclic?: ReadonlySet<Model>,
 ): string {
+	const openProgram = schemaNames?.open;
 	switch (type.kind) {
 		case "Scalar":
 			return scalarTypeScriptType(type);
 		case "Model":
 			return modelTypeScriptType(type, schemaNames, cyclic);
-		case "Enum":
-			return `z.infer<typeof ${schemaName(type, schemaNames)}Schema>`;
+		case "Enum": {
+			if (!openProgram && !(schemaNames?.filtered && !schemaNames.has(type))) {
+				return `z.infer<typeof ${schemaName(type, schemaNames)}Schema>`;
+			}
+			const values = enumValues(type).map((value) => JSON.stringify(value));
+			if (openProgram && values.length)
+				values.push('OpenValue<Open, "Unrecognised">');
+			return values.join(" | ") || "never";
+		}
 		case "Union": {
 			const variants = [...type.variants.values()].map((variant) =>
 				generateTypeScriptType(variant.type, schemaNames, cyclic),
 			);
+			const key = openProgram && discriminatorProperty(openProgram, type);
+			if (key) {
+				const base = sharedBase(type, schemaNames);
+				const extra = base
+					? ` & ${generateTypeScriptType(base, schemaNames, cyclic)}`
+					: "";
+				variants.push(
+					`OpenValue<Open, UnknownVariant<${JSON.stringify(key)}>${extra}>`,
+				);
+			}
 			return variants.length > 0 ? variants.join(" | ") : "never";
 		}
 		case "String":
@@ -660,19 +731,16 @@ function modelTypeScriptType(
 		return `Record<string, ${generateTypeScriptType(model.indexer.value, schemaNames, cyclic)}>`;
 	}
 
-	if (isAnonymousModel(model)) {
+	const name = schemaNames?.get(model);
+	if (schemaNames?.open) {
+		if (name && cyclic?.has(model)) return `${name}Output<Open>`;
+		const props = name ? getAllProperties(model) : model.properties;
+		return generateObjectType(props, schemaNames, cyclic);
+	}
+	if (isAnonymousModel(model) || (schemaNames && !name)) {
 		return generateObjectType(model.properties, schemaNames, cyclic);
 	}
-
-	if (!schemaNames) {
-		return `z.infer<typeof ${model.name}Schema>`;
-	}
-
-	const declaredName = schemaNames.get(model);
-	if (!declaredName) {
-		return generateObjectType(model.properties, schemaNames, cyclic);
-	}
-
+	const declaredName = name ?? model.name;
 	return cyclic?.has(model)
 		? declaredName
 		: `z.infer<typeof ${declaredName}Schema>`;
@@ -699,7 +767,7 @@ function generatePropertySchema(
 	prop: ModelProperty,
 	schemaNames?: SchemaNames,
 	program?: Program,
-	pending?: ReadonlySet<Model>,
+	pending?: Pending,
 ): string {
 	// A property may narrow the constraints of its own scalar type, so the
 	// property itself is the last constraint source in the chain.
@@ -734,7 +802,7 @@ function generateTypeSchema(
 	type: Type,
 	schemaNames?: SchemaNames,
 	program?: Program,
-	pending?: ReadonlySet<Model>,
+	pending?: Pending,
 ): string {
 	switch (type.kind) {
 		case "Scalar":
@@ -742,9 +810,13 @@ function generateTypeSchema(
 		case "Model":
 			return generateModelTypeSchema(type, schemaNames, program, pending);
 		case "Enum":
-			return `${schemaName(type, schemaNames)}Schema`;
+			return schemaNames?.filtered && !schemaNames.has(type)
+				? enumExpression(type, pending?.open)
+				: `${schemaName(type, schemaNames)}Schema`;
 		case "Union":
-			return generateUnionSchema(type, schemaNames, program, pending);
+			return schemaNames?.has(type)
+				? `z.lazy(() => ${schemaName(type, schemaNames)}Schema)`
+				: generateUnionSchema(type, schemaNames, program, pending);
 		case "String":
 			return literalSchema(type.value);
 		case "EnumMember":
@@ -950,7 +1022,7 @@ function generateModelTypeSchema(
 	model: Model,
 	schemaNames?: SchemaNames,
 	program?: Program,
-	pending?: ReadonlySet<Model>,
+	pending?: Pending,
 ): string {
 	if (model.name === "Array" && model.indexer?.value) {
 		const elementType = model.indexer.value;
@@ -1014,7 +1086,7 @@ function generateUnionSchema(
 	union: Union,
 	schemaNames?: SchemaNames,
 	program?: Program,
-	pending?: ReadonlySet<Model>,
+	pending?: Pending,
 ): string {
 	const variants = Array.from(union.variants.values());
 
@@ -1022,23 +1094,39 @@ function generateUnionSchema(
 		return "z.never()";
 	}
 
-	if (variants.length === 1) {
-		return generateTypeSchema(variants[0].type, schemaNames, program, pending);
-	}
-
 	const schemas = variants.map((variant) =>
 		generateTypeSchema(variant.type, schemaNames, program, pending),
 	);
 
 	const discriminator = program && discriminatorProperty(program, union);
-	if (
-		discriminator &&
-		!schemas.some((schema) => schema.startsWith("z.lazy("))
-	) {
-		return `z.discriminatedUnion(${JSON.stringify(discriminator)}, [${schemas.join(", ")}])`;
-	}
+	const open = pending?.open;
+	const key = JSON.stringify(discriminator);
+	const lazy = schemas.some((schema) => schema.startsWith("z.lazy("));
+	const discriminated = discriminator && !lazy && (open || schemas.length > 1);
+	const closed = discriminated
+		? `z.discriminatedUnion(${key}, [${schemas.join(", ")}])`
+		: zodUnion(schemas);
+	if (!open || !discriminator) return closed;
+	const tags = variants.map(({ type }) =>
+		literalValue((type as Model).properties.get(discriminator)?.type),
+	);
+	const base = sharedBase(union, schemaNames);
+	return `openUnion(open, ${closed}, ${key}, ${JSON.stringify(tags)}${base ? `, () => ${schemaName(base, schemaNames)}Schema` : ""})`;
+}
 
-	return `z.union([${schemas.join(", ")}])`;
+function sharedBase(union: Union, names?: SchemaNames): Model | undefined {
+	function bases(model: Model): Model[] {
+		const parents = model.sourceModels.map(({ model }) => model);
+		if (model.baseModel) parents.unshift(model.baseModel);
+		return parents.flatMap((base) => [base, ...bases(base)]);
+	}
+	const ancestry = Array.from(union.variants.values(), (v) =>
+		bases(v.type as Model),
+	);
+	return ancestry[0]?.find(
+		(base) =>
+			names?.has(base) && ancestry.every((parents) => parents.includes(base)),
+	);
 }
 
 // z.discriminatedUnion only takes object schemas that pin the discriminator to
@@ -1080,8 +1168,8 @@ function discriminatorProperty(
 	return propertyName;
 }
 
-function literalValue(type: Type): string | number | boolean | undefined {
-	switch (type.kind) {
+function literalValue(type?: Type): string | number | boolean | undefined {
+	switch (type?.kind) {
 		case "String":
 		case "Number":
 		case "Boolean":

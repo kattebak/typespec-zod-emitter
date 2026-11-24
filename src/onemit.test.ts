@@ -75,6 +75,18 @@ const packageOptions: ZodEmitterOptions = {
 };
 
 describe("$onEmit", () => {
+	it("filters namespaces and preserves the default schema bytes", async () => {
+		const code =
+			"namespace Api { model Pet {} } namespace ApiNext { model Foo {} }";
+		const options = { namespace: "Api", "open-decode": false };
+		const files = await emit(code, options);
+		assert.equal(
+			files.get("schemas.ts"),
+			'import { z } from "zod";\n\nexport const PetSchema = z.object({});',
+		);
+		assert.deepEqual(files, await emit(code, { namespace: "Api" }));
+	});
+
 	it("emits schemas, middleware and the package scaffolding", async () => {
 		const files = await emit(petStore, packageOptions);
 
