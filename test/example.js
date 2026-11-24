@@ -1005,7 +1005,6 @@ it("decodes unknown wire values through generated schemas", () => {
 	const { decode, WireBSchema, WireSchema, RuleTestSchema } = Schemas;
 	const row = { kind: "B", id: "w", status: "Retired", revision: 3 };
 	const extra = "Unrecognised";
-	assert.throws(() => WireBSchema.parse(row));
 	assert.equal(WireBSchema.safeParse(row).success, false);
 	assert.deepEqual(decode(WireBSchema, { ...row, extra }), {
 		success: true,
@@ -1020,14 +1019,8 @@ it("decodes unknown wire values through generated schemas", () => {
 	assert.equal(decode(WireSchema, { kind: "A", id: "w" }).success, false);
 	assert.equal(decode(WireSchema, { kind: "C", id: 1 }).success, false);
 	assert.equal(decode(WireBSchema, { ...row, revision: "3" }).success, false);
-	assert.deepEqual(
-		decode(RuleTestSchema, { test: "header", key: "x", match: "Regex" })
-			.unrecognised,
-		["Regex"],
-	);
-	assert.deepEqual(
-		decode(WireBSchema, { ...row, status: "Active", revision: 1, extra })
-			.unrecognised,
-		[],
-	);
+	const rule = { test: "header", key: "x", match: "Regex" };
+	assert.deepEqual(decode(RuleTestSchema, rule).unrecognised, ["Regex"]);
+	const known = { ...row, status: "Active", revision: 1, extra };
+	assert.deepEqual(decode(WireBSchema, known).unrecognised, []);
 });

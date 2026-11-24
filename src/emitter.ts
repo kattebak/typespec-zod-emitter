@@ -511,7 +511,7 @@ function createSchemas<Open extends boolean>(open: Open) {
 ${[definitions, ...unionSchemas].filter(Boolean).join("\n\n")}
 return { ${names.join(", ")} };
 }
-const closed = createSchemas(false) as { [K in keyof Closed]: Closed[K] & { readonly [schemaKey]: K } };
+const closed = createSchemas(false) as unknown as { [K in keyof Closed]: Closed[K] & { readonly [schemaKey]: K } };
 export const { ${names.join(", ")} } = closed;
 class OpenSchemas {
 ${readers.join("\n")}
@@ -694,9 +694,10 @@ function generateTypeScriptType(
 			);
 			const key = openProgram && discriminatorProperty(openProgram, type);
 			if (key) {
-				const base = sharedBase(type, schemaNames);
+				const base = sharedBase(type);
 				const shared =
-					base && generateTypeScriptType(base, schemaNames, cyclic);
+					base &&
+					generateObjectType(getAllProperties(base), schemaNames, cyclic);
 				const tag = JSON.stringify(key);
 				variants.push(
 					`OpenValue<Open, UnknownVariant<${tag}, ${shared ?? "{}"}>>`,
@@ -1064,7 +1065,8 @@ function generateModelTypeSchema(
 		// Model is not in our declared models (e.g., lifecycle-transformed models like Create<T>)
 		// Generate it inline as an anonymous object
 		const properties: string[] = [];
-		for (const [propName, prop] of model.properties) {
+		const inherited = schemaNames.filtered && getAllProperties(model);
+		for (const [propName, prop] of inherited || model.properties) {
 			const zodType = generatePropertySchema(
 				prop,
 				schemaNames,
@@ -1110,11 +1112,15 @@ function generateUnionSchema(
 	const tags = variants.map(({ type }) =>
 		literalValue((type as Model).properties.get(discriminator)?.type),
 	);
-	const base = sharedBase(union, schemaNames);
-	return `openUnion(open, ${closed}, ${key}, ${JSON.stringify(tags)}${base ? `, () => ${schemaName(base, schemaNames)}Schema` : ""})`;
+	const base = sharedBase(union);
+	const name = base && schemaNames?.get(base);
+	const shared = name
+		? `${name}Schema`
+		: base && generateModelTypeSchema(base, schemaNames, program, pending);
+	return `openUnion(open, ${closed}, ${key}, ${JSON.stringify(tags)}${shared ? `, () => ${shared}` : ""})`;
 }
 
-function sharedBase(union: Union, names?: SchemaNames): Model | undefined {
+function sharedBase(union: Union): Model | undefined {
 	function bases(model: Model): Model[] {
 		const parents = model.sourceModels.map(({ model }) => model);
 		if (model.baseModel) parents.unshift(model.baseModel);
@@ -1123,9 +1129,8 @@ function sharedBase(union: Union, names?: SchemaNames): Model | undefined {
 	const ancestry = Array.from(union.variants.values(), (v) =>
 		bases(v.type as Model),
 	);
-	return ancestry[0]?.find(
-		(base) =>
-			names?.has(base) && ancestry.every((parents) => parents.includes(base)),
+	return ancestry[0]?.find((base) =>
+		ancestry.every((parents) => parents.includes(base)),
 	);
 }
 

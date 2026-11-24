@@ -20,7 +20,7 @@ function openUnion<O extends boolean, S extends z.ZodType, K extends string, B e
 	})) as unknown as z.ZodType<UnknownVariant<K, z.output<B>>>);
 }
 let opened: ReturnType<typeof createSchemas<true>> | undefined;
-const getOpen = () => (opened ??= createSchemas(true));
+const getOpen = () => (opened ??= createSchemas<true>(true));
 declare const schemaKey: unique symbol;
 type Closed = ReturnType<typeof createSchemas<false>>;
 type SchemaKey = Exclude<keyof typeof OpenSchemas, "prototype">;
@@ -30,7 +30,8 @@ export function decode<S extends z.ZodType>(schema: S, value: unknown):
 	| { success: true; data: Decoded<S>; unrecognised: unknown[] }
 	| { success: false; error: z.ZodError } {
 	const key = (Object.keys(closed) as SchemaKey[]).find((key) => Object.is(closed[key], schema));
-	const result = (key === undefined ? schema : OpenSchemas[key]()).safeParse(value);
+	const readers = OpenSchemas as unknown as Record<SchemaKey, () => z.ZodType>;
+	const result = (key === undefined ? schema : readers[key]()).safeParse(value);
 	if (!result.success) return result;
 	const unrecognised: unknown[] = [];
 	function walk(input: unknown, output: unknown) {
