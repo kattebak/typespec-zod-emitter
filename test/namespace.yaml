@@ -1,0 +1,7 @@
+extends: ./tspconfig.yaml
+options:
+  "@kattebak/typespec-zod-emitter":
+    emitter-output-dir: "{cwd}/build/zod-schemas-namespace"
+    package-name: "@mycorp/zod-schemas"
+    package-version: "0.0.1"
+    namespace: Api

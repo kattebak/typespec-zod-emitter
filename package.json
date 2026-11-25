@@ -30,7 +30,7 @@
 		"test": "npm run build && npm run lint && npm run test:unit && npm run test:emit && npm run test:example",
 		"test:emit": "tsp compile test/main.tsp --config test/tspconfig.yaml",
 		"test:package": "npm run test:emit && tsc -p build/zod-schemas",
-		"test:example": "npm run test:emit && node test/zod-matrix.js && tsp compile test/open.tsp --config test/open.yaml && node test/zod-matrix.js ../build/zod-schemas-open test/open.js",
+		"test:example": "npm run test:emit && node test/zod-matrix.js && tsp compile test/open.tsp --config test/open.yaml && node test/zod-matrix.js ../build/zod-schemas-open test/open.js && tsp compile test/namespace.tsp --config test/namespace.yaml && node test/zod-matrix.js ../build/zod-schemas-namespace test/namespace.js",
 		"test:unit": "node --test --import=tsx src/*.test.ts",
 		"prepublishOnly": "tsc"
 	},

@@ -84,6 +84,25 @@ describe("$onEmit", () => {
 		assert.equal(files.get("schemas.ts"), expected);
 	});
 
+	it("inlines types the configured namespace references from outside", async () => {
+		const files = await emit(
+			`namespace Api { model Order { status: Shared.Status; item: Shared.Item; } }
+			namespace Shared {
+				enum Status { Active, Retired }
+				model Base { id: string; }
+				model Item extends Base { name: string; }
+			}`,
+			{ namespace: "Api" },
+		);
+		const expected = `import { z } from "zod";
+
+export const OrderSchema = z.object({
+\tstatus: z.enum(["Active", "Retired"]),
+\titem: z.object({ id: z.string(), name: z.string() })
+});`;
+		assert.equal(files.get("schemas.ts"), expected);
+	});
+
 	it("reports a namespace that does not exist", async () => {
 		const result = await Tester.compile("namespace Api { model A {} }");
 		await $onEmit({
