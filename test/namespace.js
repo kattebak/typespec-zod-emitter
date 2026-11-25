@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
-import { OrderSchema } from "../build/zod-schemas-namespace/schemas.ts";
+import * as schemas from "../build/zod-schemas-namespace/schemas.ts";
 
-const order = { status: "Active", item: { id: "i", name: "n" } };
-assert.deepEqual(OrderSchema.parse(order), order);
+const order = {
+	status: "Active",
+	item: { id: "i", name: "n" },
+	root: { children: [{ children: [] }] },
+};
+assert.deepEqual(schemas.OrderSchema.parse(order), order);
 assert.equal(
-	OrderSchema.safeParse({ ...order, status: "Gone" }).success,
+	schemas.OrderSchema.safeParse({ ...order, status: "Gone" }).success,
 	false,
 );
+assert.equal("UnusedSchema" in schemas, false);

@@ -84,21 +84,53 @@ describe("$onEmit", () => {
 		assert.equal(files.get("schemas.ts"), expected);
 	});
 
-	it("inlines types the configured namespace references from outside", async () => {
+	it("declares the types the configured namespace references from outside", async () => {
 		const files = await emit(
 			`namespace Api { model Order { status: Shared.Status; item: Shared.Item; } }
 			namespace Shared {
 				enum Status { Active, Retired }
 				model Base { id: string; }
 				model Item extends Base { name: string; }
+				model Unused {}
 			}`,
 			{ namespace: "Api" },
 		);
 		const expected = `import { z } from "zod";
 
+export const StatusSchema = z.enum(["Active", "Retired"]);
+
+export const ItemSchema = z.object({
+\tid: z.string(),
+\tname: z.string()
+});
+
 export const OrderSchema = z.object({
-\tstatus: z.enum(["Active", "Retired"]),
-\titem: z.object({ id: z.string(), name: z.string() })
+\tstatus: StatusSchema,
+\titem: ItemSchema
+});
+
+export const BaseSchema = z.object({
+\tid: z.string()
+});`;
+		assert.equal(files.get("schemas.ts"), expected);
+	});
+
+	it("declares a recursive type outside the configured namespace", async () => {
+		const files = await emit(
+			`namespace Api { model Doc { root: Shared.Node; } }
+			namespace Shared { model Node { children: Node[]; } }`,
+			{ namespace: "Api" },
+		);
+		const expected = `import { z } from "zod";
+
+export type Node = { children: Array<Node> };
+
+export const NodeSchema: z.ZodType<Node> = z.object({
+\tchildren: z.array(z.lazy(() => NodeSchema))
+});
+
+export const DocSchema = z.object({
+\troot: NodeSchema
 });`;
 		assert.equal(files.get("schemas.ts"), expected);
 	});

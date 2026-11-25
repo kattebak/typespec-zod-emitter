@@ -41,6 +41,19 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 	const { "open-decode": open = false } = context.options;
 	const typekit = $(context.program);
 
+	// A model referenced as Foo<Bar> is an instance, not the namespace member.
+	function emittable(type: Model | Enum): boolean {
+		const { namespace } = type;
+		if (!namespace || isTypeSpecIntrinsic(namespace)) return false;
+		if (!typekit.type.isUserDefined(type)) return false;
+		if (type.kind === "Enum") return true;
+		return (
+			namespace.models.get(type.name) === type &&
+			!isIntrinsicModel(type) &&
+			!isTemplateDeclaration(type)
+		);
+	}
+
 	function collectTypes(namespace: Namespace) {
 		if (open && !isTypeSpecIntrinsic(namespace)) {
 			for (const union of namespace.unions.values()) {
@@ -48,25 +61,10 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 					unions.push(union as NamedUnion);
 			}
 		}
-		for (const [_, model] of namespace.models) {
-			if (
-				!isIntrinsicModel(model) &&
-				!isTypeSpecIntrinsic(namespace) &&
-				typekit.type.isUserDefined(model) &&
-				!isTemplateDeclaration(model)
-			) {
-				models.push(model);
-			}
-		}
-
-		for (const [_, enumType] of namespace.enums) {
-			if (
-				!isTypeSpecIntrinsic(namespace) &&
-				typekit.type.isUserDefined(enumType)
-			) {
-				enums.push(enumType);
-			}
-		}
+		for (const [_, model] of namespace.models)
+			if (emittable(model)) models.push(model);
+		for (const [_, enumType] of namespace.enums)
+			if (emittable(enumType)) enums.push(enumType);
 
 		for (const [_, ns] of namespace.namespaces) {
 			collectTypes(ns);
@@ -84,7 +82,20 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 		});
 	collectTypes(root);
 
+	// The namespace picks the roots; every type they reach is declared too.
 	const declarations: DeclaredType[] = [...models, ...enums, ...unions];
+	const declared = new Set(declarations);
+	for (const type of declarations) {
+		if (type.kind !== "Model") continue;
+		for (const dependency of [...referencedTypes(type), type.baseModel]) {
+			if (!dependency || declared.has(dependency) || !emittable(dependency))
+				continue;
+			declared.add(dependency);
+			declarations.push(dependency);
+			if (dependency.kind === "Model") models.push(dependency);
+			else enums.push(dependency);
+		}
+	}
 	if (!declarations.length) return;
 	const { names: schemaNames, conflicts } = assignSchemaNames(declarations);
 
@@ -317,8 +328,8 @@ function schemaName(type: DeclaredType, names?: SchemaNames): string {
 	return names?.get(type) ?? type.name;
 }
 
-function referencedTypes(model: Model): Set<DeclaredType> {
-	const dependencies = new Set<DeclaredType>();
+function referencedTypes(model: Model): Set<Model | Enum> {
+	const dependencies = new Set<Model | Enum>();
 
 	function extractDependencies(type: Type): void {
 		switch (type.kind) {
