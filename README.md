@@ -304,6 +304,7 @@ option turns the whole output file off.
 
 ## Configuration Options
 
+- `namespace`: Emit schemas for a namespace and its descendants (default: all namespaces)
 - `output-file`: Name of the output file (default: "schemas.ts")
 - `output-dir`: Output directory (defaults to emitter output directory)
 - `package-name`: Package name to include in generated file header (optional)

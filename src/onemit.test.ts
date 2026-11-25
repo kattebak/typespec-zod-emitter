@@ -75,6 +75,33 @@ const packageOptions: ZodEmitterOptions = {
 };
 
 describe("$onEmit", () => {
+	it("emits only the configured namespace and its descendants", async () => {
+		const code = `namespace Api { model A {} namespace V1 { model B {} } }
+			namespace Api2 { model C {} }`;
+		const files = await emit(code, { namespace: "Api" });
+		const expected =
+			'import { z } from "zod";\n\nexport const ASchema = z.object({});\n\nexport const BSchema = z.object({});';
+		assert.equal(files.get("schemas.ts"), expected);
+	});
+
+	it("reports a namespace that does not exist", async () => {
+		const result = await Tester.compile("namespace Api { model A {} }");
+		await $onEmit({
+			program: result.program,
+			emitterOutputDir: outputDir,
+			options: { namespace: "Api.Missing" },
+		} as unknown as EmitContext<ZodEmitterOptions>);
+		const [diagnostic] = result.program.diagnostics;
+		assert.equal(
+			diagnostic?.code,
+			"@kattebak/typespec-zod-emitter/namespace-not-found",
+		);
+		assert.equal(diagnostic?.message, 'Namespace "Api.Missing" was not found.');
+		assert.ok(
+			![...result.fs.fs.keys()].some((path) => path.startsWith(outputDir)),
+		);
+	});
+
 	it("emits schemas, middleware and the package scaffolding", async () => {
 		const files = await emit(petStore, packageOptions);
 

@@ -34,6 +34,7 @@ type SchemaNames = ReadonlyMap<DeclaredType, string>;
 export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 	const models: Model[] = [];
 	const enums: Enum[] = [];
+	const filter = context.options.namespace;
 	const typekit = $(context.program);
 
 	function collectTypes(namespace: Namespace) {
@@ -62,8 +63,16 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 		}
 	}
 
-	const globalNamespace = context.program.getGlobalNamespaceType();
-	collectTypes(globalNamespace);
+	let root: Namespace | undefined = context.program.getGlobalNamespaceType();
+	for (const name of filter?.split(".") ?? [])
+		root = root?.namespaces.get(name);
+	if (!root)
+		return reportDiagnostic(context.program, {
+			code: "namespace-not-found",
+			format: { name: filter ?? "" },
+			target: context.program.getGlobalNamespaceType(),
+		});
+	collectTypes(root);
 
 	if (models.length === 0 && enums.length === 0) {
 		return;
