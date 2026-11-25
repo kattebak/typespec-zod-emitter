@@ -37,7 +37,7 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 	const models: Model[] = [];
 	const enums: Enum[] = [];
 	const unions: NamedUnion[] = [];
-	const { namespace: filter, "open-decode": open = false } = context.options;
+	const { "open-decode": open = false } = context.options;
 	const typekit = $(context.program);
 
 	function collectTypes(namespace: Namespace) {
@@ -72,16 +72,8 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 		}
 	}
 
-	let root: Namespace | undefined = context.program.getGlobalNamespaceType();
-	for (const name of filter?.split(".") ?? [])
-		root = root?.namespaces.get(name);
-	if (!root)
-		return reportDiagnostic(context.program, {
-			code: "namespace-not-found",
-			format: { name: filter ?? "" },
-			target: context.program.getGlobalNamespaceType(),
-		});
-	collectTypes(root);
+	const globalNamespace = context.program.getGlobalNamespaceType();
+	collectTypes(globalNamespace);
 
 	const declarations: DeclaredType[] = [...models, ...enums, ...unions];
 	if (!declarations.length) return;
@@ -493,10 +485,9 @@ function generateZodSchemas(
 
 	const definitions = (enumSchemas ? `${enumSchemas}\n\n` : "") + modelSchemas;
 	if (!open) return imports + header + definitions;
-	for (const model of cyclic) pending.add(model);
 	const unionSchemas = unions.map(
 		(union) =>
-			`const ${schemaName(union, schemaNames)}Schema = ${generateUnionSchema(union, schemaNames, program, pending, open)};`,
+			`const ${schemaName(union, schemaNames)}Schema = ${generateUnionSchema(union, schemaNames, program, undefined, open, cyclic)};`,
 	);
 	const declarations = [...enums, ...sorted, ...unions];
 	const names = declarations.map(
@@ -1081,6 +1072,7 @@ function generateUnionSchema(
 	program?: Program,
 	pending?: ReadonlySet<Model>,
 	open = false,
+	cyclic?: ReadonlySet<Type>,
 ): string {
 	const variants = Array.from(union.variants.values());
 
@@ -1098,7 +1090,8 @@ function generateUnionSchema(
 	if (
 		discriminator &&
 		schemas.length > 1 &&
-		!schemas.some((schema) => schema.startsWith("z.lazy("))
+		!schemas.some((schema) => schema.startsWith("z.lazy(")) &&
+		!variants.some(({ type }) => cyclic?.has(type))
 	) {
 		closed = `z.discriminatedUnion(${key}, [${schemas.join(", ")}])`;
 	}

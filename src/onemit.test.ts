@@ -75,6 +75,19 @@ const packageOptions: ZodEmitterOptions = {
 };
 
 describe("$onEmit", () => {
+	it("inlines inherited properties of an undeclared model", async () => {
+		const files = await emit(`
+			model Base { id: string; }
+			model Wrapper<T> extends Base { value: T; }
+			model Envelope { wrapper: Wrapper<int32>; }
+		`);
+		assert.ok(
+			files
+				.get("schemas.ts")
+				?.includes("wrapper: z.object({ id: z.string(), value: z.number() })"),
+		);
+	});
+
 	it("emits schemas, middleware and the package scaffolding", async () => {
 		const files = await emit(petStore, packageOptions);
 

@@ -12,7 +12,6 @@ export interface ZodEmitterOptions {
 	"emit-middleware"?: boolean;
 	"middleware-file"?: string;
 	"open-decode"?: boolean;
-	namespace?: string;
 }
 
 const emitterOptionsSchema: JSONSchemaType<ZodEmitterOptions> = {
@@ -25,7 +24,6 @@ const emitterOptionsSchema: JSONSchemaType<ZodEmitterOptions> = {
 		"package-version": { type: "string", nullable: true },
 		"emit-middleware": { type: "boolean", nullable: true, default: true },
 		"open-decode": { type: "boolean", nullable: true, default: false },
-		namespace: { type: "string", nullable: true },
 		"middleware-file": {
 			type: "string",
 			nullable: true,
@@ -38,10 +36,6 @@ const emitterOptionsSchema: JSONSchemaType<ZodEmitterOptions> = {
 export const $lib = createTypeSpecLibrary({
 	name: "@kattebak/typespec-zod-emitter",
 	diagnostics: {
-		"namespace-not-found": {
-			severity: "error",
-			messages: { default: paramMessage`Namespace "${"name"}" was not found.` },
-		},
 		"schema-name-qualified": {
 			severity: "warning",
 			messages: {
