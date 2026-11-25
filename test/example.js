@@ -1,17 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-
-const packageName = process.env.ZOD_SCHEMA_PACKAGE ?? "zod-schemas";
-const packageUrl = new URL(`../build/${packageName}/`, import.meta.url);
-const open = packageName === "zod-schemas-open";
-const {
+import {
 	createValidationMiddleware,
 	findOperation,
 	operations,
 	validationMiddleware,
-} = await import(new URL("middleware.js", packageUrl));
-const Schemas = await import(new URL("schemas.ts", packageUrl));
+} from "../build/zod-schemas/middleware.js";
+import * as Schemas from "../build/zod-schemas/schemas.ts";
 
 const validConstrained = {
 	id: "0123456789012345678901234",
@@ -107,6 +103,7 @@ describe("zod schema smoke tests", () => {
 	it("validates enum values", () => {
 		assert.equal(Schemas.StatusSchema.parse("Active"), "Active");
 		assert.equal(Schemas.PrioritySchema.parse("low"), "low");
+		assert.equal(Schemas.RevisionSchema.parse(1), 1);
 		assert.throws(() => Schemas.StatusSchema.parse("Unknown"));
 	});
 
@@ -438,11 +435,10 @@ describe("zod schema smoke tests", () => {
 		assert.throws(() => Schemas.TopSubSchema.parse({ ownField: "value" }));
 	});
 
-	it("inlines declared unions by default and validates their references", () => {
-		if (!open) {
-			assert.equal("PetTagSchema" in Schemas, false);
-			assert.equal("FeedingScheduleSchema" in Schemas, false);
-		}
+	it("inlines a declared union at every reference", () => {
+		assert.equal("PetTagSchema" in Schemas, false);
+		assert.equal("FeedingScheduleSchema" in Schemas, false);
+
 		const collared = Schemas.TaggedPetSchema.parse({
 			petId: "pet-1",
 			tag: { material: "leather", sizeCm: 40 },
@@ -908,7 +904,10 @@ describe("array constraint smoke tests", () => {
 	});
 
 	it("bounds an optional array before marking it optional", () => {
-		const source = readFileSync(new URL("schemas.ts", packageUrl), "utf8");
+		const source = readFileSync(
+			new URL("../build/zod-schemas/schemas.ts", import.meta.url),
+			"utf8",
+		);
 
 		assert.match(
 			source,
@@ -1004,28 +1003,4 @@ describe("recursive schemas", () => {
 			false,
 		);
 	});
-});
-
-it("decodes unknown wire values", { skip: !open }, () => {
-	const { decode, WireBSchema, WireSchema, RuleTestSchema } = Schemas;
-	const row = { kind: "B", id: "w", status: "Retired", revision: 3 };
-	const extra = "Unrecognised";
-	assert.equal(WireBSchema.safeParse(row).success, false);
-	assert.deepEqual(decode(WireBSchema, { ...row, extra }), {
-		success: true,
-		data: { ...row, status: extra, revision: extra },
-		unrecognised: ["Retired", 3],
-	});
-	assert.deepEqual(decode(WireSchema, { kind: "C", id: "w", extra }), {
-		success: true,
-		data: { kind: extra, id: "w", extra },
-		unrecognised: ["C"],
-	});
-	assert.equal(decode(WireSchema, { kind: "A", id: "w" }).success, false);
-	assert.equal(decode(WireSchema, { kind: "C", id: 1 }).success, false);
-	assert.equal(decode(WireBSchema, { ...row, revision: "3" }).success, false);
-	const rule = { test: "header", key: "x", match: "Regex" };
-	assert.deepEqual(decode(RuleTestSchema, rule).unrecognised, ["Regex"]);
-	const known = { ...row, status: "Active", revision: 1, extra };
-	assert.deepEqual(decode(WireBSchema, known).unrecognised, []);
 });

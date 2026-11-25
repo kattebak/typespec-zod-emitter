@@ -1,46 +1,30 @@
-export const decodeRuntime = `type OpenValue<O extends boolean, T> = O extends true ? T : never;
-type UnknownVariant<K extends string, B> = Record<string, unknown> & Record<K, "Unrecognised"> & B;
-type OpenSchema<O extends boolean, S extends z.ZodType, T> = O extends true ? z.ZodType<z.output<S> | T> : S;
+export const decodeRuntime = `type UnknownVariant<K extends string, B> = Record<string, unknown> & Record<K, "Unrecognised"> & B;
 const unrecognisedValue = () => "Unrecognised" as const;
 function openSchema<O extends boolean, S extends z.ZodType, F extends z.ZodType>(open: O, schema: S, fallback: () => F) {
-	return (open ? z.union([schema, fallback()]) : schema) as unknown as OpenSchema<O, S, z.output<F>>;
+	return (open ? z.union([schema, fallback()]) : schema) as unknown as (O extends true ? z.ZodType<z.output<S> | z.output<F>> : S);
 }
-function openUnion<O extends boolean, S extends z.ZodType, K extends string, B extends z.ZodType = z.ZodType<{}>>(
-	open: O, schema: S, key: K, tags: readonly (string | number | boolean)[], base?: () => B,
-) {
-	return openSchema(open, schema, () => z.preprocess((value) => {
-		if (typeof value !== "object" || value === null || Array.isArray(value)) return;
-		const tag = Object.getOwnPropertyDescriptor(value, key)?.value;
-		if (!tags.includes(tag) && tags.some((known) => typeof known === typeof tag)) {
-			return { ...value, [key]: unrecognisedValue() };
-		}
-	}, z.lazy(() => {
-		const model = base?.() as { shape: z.ZodRawShape } | undefined;
-		return z.object({ ...model?.shape, [key]: z.literal("Unrecognised") }).passthrough();
-	})) as unknown as z.ZodType<UnknownVariant<K, z.output<B>>>);
+function openVariant<K extends string, B = {}>(key: K, tags: readonly string[], base?: () => (z.ZodType & { readonly _output: B })) {
+	const tag = z.string().refine((value) => !tags.includes(value)).transform(unrecognisedValue);
+	return z.lazy(() => {
+		const schema = base?.() as { shape: z.ZodRawShape } | undefined;
+		return z.object({ ...schema?.shape, [key]: tag }).passthrough();
+	}) as unknown as z.ZodType<UnknownVariant<K, B>>;
 }
 let opened: ReturnType<typeof createSchemas<true>> | undefined;
 const getOpen = () => (opened ??= createSchemas<true>(true));
-declare const schemaKey: unique symbol;
-type Closed = ReturnType<typeof createSchemas<false>>;
 type SchemaKey = Exclude<keyof typeof OpenSchemas, "prototype">;
-type Decoded<S extends z.ZodType> = S extends { readonly [schemaKey]: infer K extends SchemaKey }
-	? z.output<ReturnType<(typeof OpenSchemas)[K]>> : z.output<S>;
-export function decode<S extends z.ZodType>(schema: S, value: unknown):
-	| { success: true; data: Decoded<S>; unrecognised: unknown[] }
+type Decoded<K extends SchemaKey> = z.output<ReturnType<(typeof OpenSchemas)[K]>>;
+export function decode<K extends SchemaKey>(key: K, value: unknown):
+	| { success: true; data: Decoded<K>; unrecognised: unknown[] }
 	| { success: false; error: z.ZodError } {
-	const key = (Object.keys(closed) as SchemaKey[]).find((key) => Object.is(closed[key], schema));
-	const readers = OpenSchemas as unknown as Record<SchemaKey, () => z.ZodType>;
-	const result = (key === undefined ? schema : readers[key]()).safeParse(value);
+	const result = getOpen()[key].safeParse(value);
 	if (!result.success) return result;
 	const unrecognised: unknown[] = [];
 	function walk(input: unknown, output: unknown) {
 		if (output === "Unrecognised" && input !== output) unrecognised.push(input);
-		if (input && output && typeof input === "object" && typeof output === "object") {
-			for (const key of Object.keys(output)) walk(Reflect.get(input, key), Reflect.get(output, key));
-		}
+		if (!input || !output || typeof input !== "object" || typeof output !== "object") return;
+		for (const [key, child] of Object.entries(output)) walk(Reflect.get(input, key), child);
 	}
 	walk(value, result.data);
-	return { success: true, data: result.data as Decoded<S>, unrecognised };
-}
-`;
+	return { ...result, data: result.data as Decoded<K>, unrecognised };
+}`;

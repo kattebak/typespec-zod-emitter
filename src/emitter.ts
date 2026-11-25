@@ -14,7 +14,6 @@ import {
 	type Model,
 	type ModelProperty,
 	type Namespace,
-	NoTarget,
 	type Program,
 	resolvePath,
 	type Scalar,
@@ -38,17 +37,15 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 	const models: Model[] = [];
 	const enums: Enum[] = [];
 	const unions: NamedUnion[] = [];
-	const { namespace: filter, "open-decode": openDecode } = context.options;
+	const { namespace: filter, "open-decode": open = false } = context.options;
 	const typekit = $(context.program);
 
 	function collectTypes(namespace: Namespace) {
-		if (openDecode && !isTypeSpecIntrinsic(namespace)) {
-			unions.push(
-				...[...namespace.unions.values()].filter(
-					(union): union is NamedUnion =>
-						!!union.name && typekit.type.isUserDefined(union),
-				),
-			);
+		if (open && !isTypeSpecIntrinsic(namespace)) {
+			for (const union of namespace.unions.values()) {
+				if (union.name && typekit.type.isUserDefined(union))
+					unions.push(union as NamedUnion);
+			}
 		}
 		for (const [_, model] of namespace.models) {
 			if (
@@ -76,24 +73,18 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 	}
 
 	let root: Namespace | undefined = context.program.getGlobalNamespaceType();
-	if (typeof filter === "string") {
-		for (const part of filter.split(".")) root = root?.namespaces.get(part);
-		if (!root) {
-			reportDiagnostic(context.program, {
-				code: "namespace-not-found",
-				format: { name: filter },
-				target: NoTarget,
-			});
-			return;
-		}
-	}
+	for (const name of filter?.split(".") ?? [])
+		root = root?.namespaces.get(name);
+	if (!root)
+		return reportDiagnostic(context.program, {
+			code: "namespace-not-found",
+			format: { name: filter ?? "" },
+			target: context.program.getGlobalNamespaceType(),
+		});
 	collectTypes(root);
 
-	if (models.length === 0 && enums.length === 0 && unions.length === 0) {
-		return;
-	}
-
 	const declarations: DeclaredType[] = [...models, ...enums, ...unions];
+	if (!declarations.length) return;
 	const { names: schemaNames, conflicts } = assignSchemaNames(declarations);
 
 	for (const declaration of declarations) {
@@ -101,7 +92,7 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 		if (name && name !== declaration.name) {
 			reportDiagnostic(context.program, {
 				code: "schema-name-qualified",
-				format: { name: schemaName(declaration), qualified: name },
+				format: { name: declaration.name, qualified: name },
 				target: declaration,
 			});
 		}
@@ -110,7 +101,7 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 	for (const declaration of conflicts) {
 		reportDiagnostic(context.program, {
 			code: "duplicate-schema-name",
-			format: { name: schemaName(declaration, schemaNames) },
+			format: { name: schemaNames.get(declaration) ?? declaration.name },
 			target: declaration,
 		});
 	}
@@ -123,11 +114,12 @@ export async function $onEmit(context: EmitContext<ZodEmitterOptions>) {
 	const content = generateZodSchemas(
 		models,
 		enums,
+		unions,
+		open,
 		packageName,
 		packageVersion,
 		schemaNames,
 		context.program,
-		openDecode ? unions : undefined,
 	);
 
 	await emitFile(context.program, {
@@ -309,7 +301,7 @@ function assignSchemaNames(types: readonly DeclaredType[]): {
 	}
 
 	for (const type of types) {
-		const name = schemaName(type, names);
+		const name = names.get(type) ?? type.name;
 		if (taken.has(name)) {
 			conflicts.push(type);
 			continue;
@@ -457,11 +449,12 @@ function topologicalSort(models: Model[]): Model[] {
 function generateZodSchemas(
 	models: Model[],
 	enums: Enum[],
+	unions: NamedUnion[],
+	open: boolean,
 	packageName?: string,
 	packageVersion?: string,
 	schemaNames?: SchemaNames,
 	program?: Program,
-	unions?: NamedUnion[],
 ): string {
 	const imports = 'import { z } from "zod";\n\n';
 
@@ -478,63 +471,70 @@ function generateZodSchemas(
 	}
 
 	const { sorted, cyclic } = orderSchemas(models);
-	const open = unions !== undefined;
 	const enumSchemas = enums
 		.map((enumType) => generateEnumSchema(enumType, schemaNames, open))
 		.join("\n\n");
 
 	const pending = new Set(sorted);
-	const modelSchemas: string[] = [];
-	for (const model of sorted) {
-		modelSchemas.push(
-			generateModelSchema(model, schemaNames, program, pending, cyclic, open),
-		);
-		pending.delete(model);
-	}
+	const modelSchemas = sorted
+		.map((model) => {
+			const schema = generateModelSchema(
+				model,
+				schemaNames,
+				program,
+				pending,
+				cyclic,
+				open,
+			);
+			pending.delete(model);
+			return schema;
+		})
+		.join("\n\n");
 
-	const definitions =
-		(enumSchemas ? `${enumSchemas}\n\n` : "") + modelSchemas.join("\n\n");
-	if (!unions) return imports + header + definitions;
+	const definitions = (enumSchemas ? `${enumSchemas}\n\n` : "") + modelSchemas;
+	if (!open) return imports + header + definitions;
 	for (const model of cyclic) pending.add(model);
 	const unionSchemas = unions.map(
 		(union) =>
-			`const ${schemaName(union, schemaNames)}Schema = ${generateUnionSchema(union, schemaNames, program, pending, true)};`,
+			`const ${schemaName(union, schemaNames)}Schema = ${generateUnionSchema(union, schemaNames, program, pending, open)};`,
 	);
-	const nameOf = (t: DeclaredType) => `${schemaName(t, schemaNames)}Schema`;
-	const names = [...enums, ...sorted, ...unions].map(nameOf);
-	// Separate methods let TypeScript serialize each schema independently.
-	const readers = names.map((n) => `static ${n}() { return getOpen().${n}; }`);
+	const declarations = [...enums, ...sorted, ...unions];
+	const names = declarations.map(
+		(type) => `${schemaName(type, schemaNames)}Schema`,
+	);
 	const aliases = [...cyclic].map((model) => {
 		const name = schemaName(model, schemaNames);
-		return `type ${name}Output<Open extends boolean> = ${generateObjectType(model, schemaNames, cyclic, program, true)};\nexport type ${name} = ${name}Output<false>;`;
+		return `type ${name}Output<Open extends boolean> = ${generateObjectType(getAllProperties(model), schemaNames, { cyclic, open, program })};\nexport type ${name} = ${name}Output<false>;`;
 	});
 	return `${imports}${header}${decodeRuntime}
 function createSchemas<Open extends boolean>(open: Open) {
 ${[definitions, ...unionSchemas].filter(Boolean).join("\n\n")}
 return { ${names.join(", ")} };
 }
-const closed = createSchemas(false) as unknown as { [K in keyof Closed]: Closed[K] & { readonly [schemaKey]: K } };
-export const { ${names.join(", ")} } = closed;
-class OpenSchemas {
-${readers.join("\n")}
+export const { ${names.join(", ")} } = createSchemas(false);
+class OpenSchemas { // Separate methods let TypeScript serialize each schema independently.
+${names.map((name) => `static ${name}() { return getOpen().${name}; }`).join("\n")}
 }
-${aliases.join("\n")}
-`;
+${aliases.join("\n")}`;
 }
 
-function generateEnumSchema(type: Enum, names?: SchemaNames, open?: boolean) {
-	return `${open ? "" : "export "}const ${schemaName(type, names)}Schema = ${enumExpression(type, open)};`;
+function generateEnumSchema(
+	enumType: Enum,
+	schemaNames?: SchemaNames,
+	open = false,
+): string {
+	return `${open ? "" : "export "}const ${schemaName(enumType, schemaNames)}Schema = ${enumExpression(enumType, open)};`;
 }
 
-function enumExpression(enumType: Enum, openDecode?: boolean): string {
+function enumExpression(enumType: Enum, open: boolean): string {
 	const values = enumValues(enumType);
 	if (!values.length) return "z.never()";
-	const enumSchema = `z.enum([${values.map((value) => JSON.stringify(value)).join(", ")}])`;
-	if (!openDecode) return enumSchema;
-	const kinds = [...new Set(values.map((value) => `z.${typeof value}()`))];
-	const numeric = kinds.includes("z.number()");
-	const schema = numeric ? zodUnion(values.map(literalSchema)) : enumSchema;
-	return `openSchema(open, ${schema}, () => ${zodUnion(kinds)}.transform(unrecognisedValue))`;
+	const kinds = new Set(values.map((value) => `z.${typeof value}()`));
+	const schema = kinds.has("z.number()")
+		? zodUnion(values.map(literalSchema))
+		: `z.enum([${values.map((value) => JSON.stringify(value)).join(", ")}])`;
+	if (!open) return schema;
+	return `openSchema(open, ${schema}, () => ${zodUnion([...kinds])}.transform(unrecognisedValue))`;
 }
 
 function enumValues(type: Enum) {
@@ -628,43 +628,48 @@ function generateModelSchema(
 	cyclic?: ReadonlySet<Model>,
 	open = false,
 ): string {
-	const properties = [...getAllProperties(model)].map(
-		([name, prop]) =>
-			`\t${quotePropertyName(name)}: ${generatePropertySchema(prop, schemaNames, program, pending, open)}`,
-	);
+	const properties: string[] = [];
+
+	for (const [propName, prop] of getAllProperties(model)) {
+		const quotedName = quotePropertyName(propName);
+		properties.push(
+			`\t${quotedName}: ${generatePropertySchema(prop, schemaNames, program, pending, open)}`,
+		);
+	}
 
 	const schemaBody =
 		properties.length > 0 ? `{\n${properties.join(",\n")}\n}` : "{}";
 	const name = schemaName(model, schemaNames);
 
-	const exported = open ? "" : "export ";
-	if (!cyclic?.has(model))
-		return `${exported}const ${name}Schema = z.object(${schemaBody});`;
-
+	if (!cyclic?.has(model)) {
+		return `${open ? "" : "export "}const ${name}Schema = z.object(${schemaBody});`;
+	}
 	if (open)
 		return `const ${name}Schema = z.object(${schemaBody}) as unknown as z.ZodType<${name}Output<Open>>;`;
 
 	// A schema that refers to itself has no inferable type, so it is annotated
 	// with a declared type instead.
-	const declaredType = generateObjectType(model, schemaNames, cyclic);
+	const declaredType = generateObjectType(
+		getAllProperties(model),
+		schemaNames,
+		{ cyclic },
+	);
 	return `export type ${name} = ${declaredType};\n\nexport const ${name}Schema: z.ZodType<${name}> = z.object(${schemaBody});`;
 }
 
+type TypeOptions = {
+	cyclic?: ReadonlySet<Model>;
+	open?: boolean;
+	program?: Program;
+};
+
 function generateObjectType(
-	model: Model,
-	names?: SchemaNames,
-	cyclic?: ReadonlySet<Model>,
-	program?: Program,
-	open = false,
+	properties: ReadonlyMap<string, ModelProperty>,
+	schemaNames?: SchemaNames,
+	options: TypeOptions = {},
 ): string {
-	const members = [...getAllProperties(model)].map(([propName, prop]) => {
-		const type = generateTypeScriptType(
-			prop.type,
-			names,
-			cyclic,
-			program,
-			open,
-		);
+	const members = [...properties].map(([propName, prop]) => {
+		const type = generateTypeScriptType(prop.type, schemaNames, options);
 		// zod 3 infers a key holding unknown as optional.
 		const optional = prop.optional || type === "unknown" ? "?" : "";
 		return `${quotePropertyName(propName)}${optional}: ${type}`;
@@ -674,37 +679,34 @@ function generateObjectType(
 
 function generateTypeScriptType(
 	type: Type,
-	names?: SchemaNames,
-	cyclic?: ReadonlySet<Model>,
-	program?: Program,
-	open = false,
+	schemaNames?: SchemaNames,
+	options: TypeOptions = {},
 ): string {
+	const { program, open } = options;
 	switch (type.kind) {
 		case "Scalar":
 			return scalarTypeScriptType(type);
 		case "Model":
-			return modelTypeScriptType(type, names, cyclic, program, open);
+			return modelTypeScriptType(type, schemaNames, options);
 		case "Enum": {
-			if (!open && (!names || names.has(type))) {
-				return `z.infer<typeof ${schemaName(type, names)}Schema>`;
-			}
-			const values = enumValues(type).map((value) => JSON.stringify(value));
-			if (open && values.length) values.push('OpenValue<Open, "Unrecognised">');
+			const values =
+				!schemaNames || schemaNames.has(type)
+					? [`z.infer<typeof ${schemaName(type, schemaNames)}Schema>`]
+					: enumValues(type).map((value) => JSON.stringify(value));
+			if (open && type.members.size)
+				values.push('(Open extends true ? "Unrecognised" : never)');
 			return values.join(" | ") || "never";
 		}
 		case "Union": {
 			const variants = [...type.variants.values()].map(({ type }) =>
-				generateTypeScriptType(type, names, cyclic, program, open),
+				generateTypeScriptType(type, schemaNames, options),
 			);
 			const key = open && program && discriminatorProperty(program, type);
 			if (key) {
 				const base = sharedBase(type);
-				const shared =
-					base && generateObjectType(base, names, cyclic, program, open);
-				const tag = JSON.stringify(key);
-				variants.push(
-					`OpenValue<Open, UnknownVariant<${tag}, ${shared ?? "{}"}>>`,
-				);
+				const shared = base && modelTypeScriptType(base, schemaNames, options);
+				const fallback = `UnknownVariant<${JSON.stringify(key)}, ${shared ?? "{}"}>`;
+				variants.push(`(Open extends true ? ${fallback} : never)`);
 			}
 			return variants.length > 0 ? variants.join(" | ") : "never";
 		}
@@ -724,28 +726,33 @@ function generateTypeScriptType(
 
 function modelTypeScriptType(
 	model: Model,
-	names?: SchemaNames,
-	cyclic?: ReadonlySet<Model>,
-	program?: Program,
-	open = false,
+	schemaNames?: SchemaNames,
+	options: TypeOptions = {},
 ): string {
 	if (model.name === "Array" && model.indexer?.value) {
-		return `Array<${generateTypeScriptType(model.indexer.value, names, cyclic, program, open)}>`;
+		return `Array<${generateTypeScriptType(model.indexer.value, schemaNames, options)}>`;
 	}
 
 	if (model.indexer && model.indexer.key.name === "string") {
-		return `Record<string, ${generateTypeScriptType(model.indexer.value, names, cyclic, program, open)}>`;
+		return `Record<string, ${generateTypeScriptType(model.indexer.value, schemaNames, options)}>`;
 	}
 
-	const name = names?.get(model);
-	if (open && name && cyclic?.has(model)) return `${name}Output<Open>`;
-	if (open || isAnonymousModel(model) || (names && !names.has(model))) {
-		return generateObjectType(model, names, cyclic, program, open);
+	if (isAnonymousModel(model)) {
+		return generateObjectType(model.properties, schemaNames, options);
 	}
-	const declaredName = name ?? model.name;
-	return cyclic?.has(model)
-		? declaredName
-		: `z.infer<typeof ${declaredName}Schema>`;
+
+	if (!schemaNames) {
+		return `z.infer<typeof ${model.name}Schema>`;
+	}
+
+	const declaredName = schemaNames.get(model);
+	const recursive = declaredName && options.cyclic?.has(model);
+	if (options.open && recursive) return `${declaredName}Output<Open>`;
+	if (!declaredName || options.open) {
+		return generateObjectType(getAllProperties(model), schemaNames, options);
+	}
+
+	return recursive ? declaredName : `z.infer<typeof ${declaredName}Schema>`;
 }
 
 const SCALAR_TYPE_MAP = new Map<string, string>([
@@ -814,14 +821,13 @@ function generateTypeSchema(
 		case "Model":
 			return generateModelTypeSchema(type, schemaNames, program, pending, open);
 		case "Enum":
-			return schemaNames && !schemaNames.has(type)
-				? enumExpression(type, open)
-				: `${schemaName(type, schemaNames)}Schema`;
+			if (schemaNames && !schemaNames.has(type))
+				return enumExpression(type, open);
+			return `${schemaName(type, schemaNames)}Schema`;
 		case "Union": {
 			const name = schemaNames?.get(type);
-			return name
-				? `z.lazy(() => ${name}Schema)`
-				: generateUnionSchema(type, schemaNames, program, pending, open);
+			if (name) return `z.lazy(() => ${name}Schema)`;
+			return generateUnionSchema(type, schemaNames, program, pending, open);
 		}
 		case "String":
 			return literalSchema(type.value);
@@ -1041,20 +1047,32 @@ function generateModelTypeSchema(
 		return `z.record(z.string(), ${generateTypeSchema(valueType, schemaNames, program, pending, open)})`;
 	}
 
-	if (!isAnonymousModel(model) && (!schemaNames || schemaNames.has(model))) {
-		const name = schemaName(model, schemaNames);
-		return pending?.has(model)
-			? `z.lazy(() => ${name}Schema)`
-			: `${name}Schema`;
+	if (schemaNames || isAnonymousModel(model)) {
+		const declaredName = schemaNames?.get(model);
+		if (declaredName) {
+			return pending?.has(model)
+				? `z.lazy(() => ${declaredName}Schema)`
+				: `${declaredName}Schema`;
+		}
+
+		const properties: string[] = [];
+		for (const [propName, prop] of getAllProperties(model)) {
+			const zodType = generatePropertySchema(
+				prop,
+				schemaNames,
+				program,
+				pending,
+				open,
+			);
+			const quotedName = quotePropertyName(propName);
+			properties.push(`${quotedName}: ${zodType}`);
+		}
+		const schemaBody =
+			properties.length > 0 ? `{ ${properties.join(", ")} }` : "{}";
+		return `z.object(${schemaBody})`;
 	}
 
-	const properties = [...getAllProperties(model)].map(
-		([name, prop]) =>
-			`${quotePropertyName(name)}: ${generatePropertySchema(prop, schemaNames, program, pending, open)}`,
-	);
-	return properties.length
-		? `z.object({ ${properties.join(", ")} })`
-		: "z.object({})";
+	return `${model.name}Schema`;
 }
 
 function generateUnionSchema(
@@ -1076,22 +1094,21 @@ function generateUnionSchema(
 
 	const discriminator = program && discriminatorProperty(program, union);
 	const key = JSON.stringify(discriminator);
-	const lazy = schemas.some((schema) => schema.startsWith("z.lazy("));
-	const discriminated = discriminator && !lazy && (open || schemas.length > 1);
-	const closed = discriminated
-		? `z.discriminatedUnion(${key}, [${schemas.join(", ")}])`
-		: zodUnion(schemas);
+	let closed = zodUnion(schemas);
+	if (
+		discriminator &&
+		schemas.length > 1 &&
+		!schemas.some((schema) => schema.startsWith("z.lazy("))
+	) {
+		closed = `z.discriminatedUnion(${key}, [${schemas.join(", ")}])`;
+	}
 	if (!open || !discriminator) return closed;
-	const tags = variants.map(({ type }) =>
-		literalValue((type as Model).properties.get(discriminator)?.type),
-	);
+	const tags = JSON.stringify([...union.variants.keys()]);
 	const base = sharedBase(union);
-	const name = base && schemaNames?.get(base);
-	const shared = name
-		? `${name}Schema`
-		: base &&
-			generateModelTypeSchema(base, schemaNames, program, pending, open);
-	return `openUnion(open, ${closed}, ${key}, ${JSON.stringify(tags)}${shared ? `, () => ${shared}` : ""})`;
+	const shared = base
+		? `, () => ${generateTypeSchema(base, schemaNames, program, undefined, open)}`
+		: "";
+	return `openSchema(open, ${closed}, () => openVariant(${key}, ${tags}${shared}))`;
 }
 
 function sharedBase(union: Union): Model | undefined {
@@ -1100,12 +1117,11 @@ function sharedBase(union: Union): Model | undefined {
 		if (model.baseModel) parents.unshift(model.baseModel);
 		return parents.flatMap((base) => [base, ...bases(base)]);
 	}
-	const ancestry = Array.from(union.variants.values(), (v) =>
-		bases(v.type as Model),
+	const variants = [...union.variants.values()];
+	const [first, ...rest] = variants.map((variant) =>
+		bases(variant.type as Model),
 	);
-	return ancestry[0]?.find((base) =>
-		ancestry.every((parents) => parents.includes(base)),
-	);
+	return first?.find((base) => rest.every((parents) => parents.includes(base)));
 }
 
 // z.discriminatedUnion only takes object schemas that pin the discriminator to
@@ -1147,8 +1163,8 @@ function discriminatorProperty(
 	return propertyName;
 }
 
-function literalValue(type?: Type): string | number | boolean | undefined {
-	switch (type?.kind) {
+function literalValue(type: Type): string | number | boolean | undefined {
+	switch (type.kind) {
 		case "String":
 		case "Number":
 		case "Boolean":

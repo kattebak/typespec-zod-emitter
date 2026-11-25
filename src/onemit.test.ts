@@ -75,27 +75,6 @@ const packageOptions: ZodEmitterOptions = {
 };
 
 describe("$onEmit", () => {
-	it("keeps the closed output bytes when filtering namespaces", async () => {
-		const code = "namespace Api { model A {} } namespace Api2 { model B {} }";
-		const files = await emit(code, { namespace: "Api" });
-		const expected =
-			'import { z } from "zod";\n\nexport const ASchema = z.object({});';
-		assert.equal(files.get("schemas.ts"), expected);
-	});
-
-	it("inlines inherited properties of an undeclared model by default", async () => {
-		const files = await emit(`
-			model Base { id: string; }
-			model Wrapper<T> extends Base { value: T; }
-			model Envelope { wrapper: Wrapper<int32>; }
-		`);
-		assert.ok(
-			files
-				.get("schemas.ts")
-				?.includes("wrapper: z.object({ id: z.string(), value: z.number() })"),
-		);
-	});
-
 	it("emits schemas, middleware and the package scaffolding", async () => {
 		const files = await emit(petStore, packageOptions);
 

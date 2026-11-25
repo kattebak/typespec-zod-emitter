@@ -27,10 +27,10 @@
 		"lint": "npx @biomejs/biome check",
 		"build": "tsc",
 		"watch": "tsc --watch",
-		"test": "npm run build && npm run lint && npm run test:unit && npm run test:example",
+		"test": "npm run build && npm run lint && npm run test:unit && npm run test:emit && npm run test:example",
 		"test:emit": "tsp compile test/main.tsp --config test/tspconfig.yaml",
 		"test:package": "npm run test:emit && tsc -p build/zod-schemas",
-		"test:example": "npm run test:emit && node test/zod-matrix.js && tsp compile test/open.tsp --config test/tspconfig.yaml --option @kattebak/typespec-zod-emitter.emitter-output-dir={cwd}/build/zod-schemas-open --option @kattebak/typespec-zod-emitter.open-decode=true && node test/zod-matrix.js zod-schemas-open",
+		"test:example": "npm run test:emit && node test/zod-matrix.js && tsp compile test/open.tsp --config test/open.yaml && node test/zod-matrix.js ../build/zod-schemas-open test/open.js",
 		"test:unit": "node --test --import=tsx src/*.test.ts",
 		"prepublishOnly": "tsc"
 	},
