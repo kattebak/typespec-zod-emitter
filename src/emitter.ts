@@ -782,7 +782,9 @@ function generatePropertySchema(
 	}
 
 	if (prop.optional) {
-		schema += ".optional()";
+		// A method call on the unresolved conditional `openSchema` type leaks
+		// the open output into the closed schema; `z.optional` resolves it.
+		schema = open ? `z.optional(${schema})` : `${schema}.optional()`;
 	}
 
 	return schema;

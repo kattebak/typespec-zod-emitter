@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
@@ -297,6 +304,48 @@ describe("$onEmit", () => {
 			...["--noEmit", "--strict", "--skipLibCheck", "--target", "ES2020"],
 			...["--module", "ESNext", "--moduleResolution", "bundler"],
 			join(dir, "schemas.ts"),
+		]);
+		await rm(dir, { recursive: true });
+		assert.equal(tsc.status, 0, tsc.stdout.toString());
+	});
+
+	it("keeps optional enum and union references closed in open-decode output", async () => {
+		const files = await emit(
+			`enum Color { Red, Green }
+			model A { kind: "a"; } model B { kind: "b"; }
+			@discriminated(#{ envelope: "none", discriminatorPropertyName: "kind" })
+			union Shape { a: A, b: B }
+			model Holder { color?: Color; shape?: Shape; }`,
+			{ "open-decode": true },
+		);
+		await mkdir(join(packageRoot, "build"), { recursive: true });
+		const dir = await mkdtemp(join(packageRoot, "build", "open-optional-"));
+		await mkdir(join(dir, "node_modules"));
+		await symlink(
+			join(packageRoot, "node_modules/zod4"),
+			join(dir, "node_modules/zod"),
+		);
+		await writeFile(join(dir, "schemas.ts"), files.get("schemas.ts") ?? "");
+		await writeFile(
+			join(dir, "check.ts"),
+			`import type { z } from "zod";
+			import { ColorSchema, HolderSchema, decode } from "./schemas.js";
+			type Closed = Required<z.infer<typeof HolderSchema>>;
+			// @ts-expect-error the closed color excludes "Unrecognised"
+			export const color: Closed["color"] = "Unrecognised";
+			// @ts-expect-error the closed shape excludes "Unrecognised"
+			export const shape: Closed["shape"]["kind"] = "Unrecognised";
+			export const options: readonly ("Red" | "Green")[] = ColorSchema.options;
+			export const red: "Red" = ColorSchema.enum.Red;
+			type Open = Required<Extract<ReturnType<typeof decode<"HolderSchema">>, { success: true }>["data"]>;
+			export const openColor: Open["color"] = "Unrecognised";
+			export const openShape: Open["shape"]["kind"] = "Unrecognised";`,
+		);
+		const tsc = spawnSync(process.execPath, [
+			join(packageRoot, "node_modules/typescript/bin/tsc"),
+			...["--noEmit", "--strict", "--skipLibCheck", "--target", "ES2020"],
+			...["--module", "ESNext", "--moduleResolution", "bundler"],
+			join(dir, "check.ts"),
 		]);
 		await rm(dir, { recursive: true });
 		assert.equal(tsc.status, 0, tsc.stdout.toString());
