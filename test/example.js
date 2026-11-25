@@ -103,6 +103,7 @@ describe("zod schema smoke tests", () => {
 	it("validates enum values", () => {
 		assert.equal(Schemas.StatusSchema.parse("Active"), "Active");
 		assert.equal(Schemas.PrioritySchema.parse("low"), "low");
+		assert.equal(Schemas.RevisionSchema.parse(1), 1);
 		assert.throws(() => Schemas.StatusSchema.parse("Unknown"));
 	});
 

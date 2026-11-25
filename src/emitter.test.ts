@@ -92,7 +92,7 @@ describe("emitter helpers", () => {
 		);
 		assert.equal(
 			__test.generateEnumSchema(mixedEnum),
-			'export const StatusSchema = z.enum(["Active", "low", 1]);',
+			'export const StatusSchema = z.union([z.literal("Active"), z.literal("low"), z.literal(1)]);',
 		);
 	});
 
@@ -168,6 +168,8 @@ describe("emitter helpers", () => {
 		const content = __test.generateZodSchemas(
 			models,
 			[],
+			[],
+			false,
 			"unit-tests",
 			"1.0.0",
 			modelNameMap,

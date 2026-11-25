@@ -3,6 +3,7 @@ import "@typespec/http";
 
 using Http;
 
+enum Revision { First: 1, Second: 2 }
 enum Status {
 	Active,
 	Inactive,
