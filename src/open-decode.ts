@@ -17,7 +17,8 @@ type Decoded<K extends SchemaKey> = z.output<ReturnType<(typeof OpenSchemas)[K]>
 export function decode<K extends SchemaKey>(key: K, value: unknown):
 	| { success: true; data: Decoded<K>; unrecognised: unknown[] }
 	| { success: false; error: z.ZodError } {
-	const result = getOpen()[key].safeParse(value);
+	const schema: z.ZodType = getOpen()[key];
+	const result = schema.safeParse(value);
 	if (!result.success) return result;
 	const unrecognised: unknown[] = [];
 	function walk(input: unknown, output: unknown) {

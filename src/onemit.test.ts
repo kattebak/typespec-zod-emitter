@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
@@ -279,6 +280,26 @@ describe("$onEmit", () => {
 		assert.equal(manifest.peerDependencies.zod, __test.ZOD_PEER_RANGE);
 		assert.equal(manifest.devDependencies.zod3, "npm:zod@^3.23.0");
 		assert.equal(manifest.devDependencies.zod4, "npm:zod@^4.0.0");
+	});
+
+	it("type-checks open-decode output for a spec with hundreds of models", async () => {
+		const models = Array.from(
+			{ length: 300 },
+			(_, i) =>
+				`enum E${i} { A${i}, B${i} } model M${i} { e: E${i}; u: "x${i}" | M${i ? i - 1 : 0}[]; }`,
+		);
+		const files = await emit(models.join("\n"), { "open-decode": true });
+		await mkdir(join(packageRoot, "build"), { recursive: true });
+		const dir = await mkdtemp(join(packageRoot, "build", "open-decode-"));
+		await writeFile(join(dir, "schemas.ts"), files.get("schemas.ts") ?? "");
+		const tsc = spawnSync(process.execPath, [
+			join(packageRoot, "node_modules/typescript/bin/tsc"),
+			...["--noEmit", "--strict", "--skipLibCheck", "--target", "ES2020"],
+			...["--module", "ESNext", "--moduleResolution", "bundler"],
+			join(dir, "schemas.ts"),
+		]);
+		await rm(dir, { recursive: true });
+		assert.equal(tsc.status, 0, tsc.stdout.toString());
 	});
 });
 
