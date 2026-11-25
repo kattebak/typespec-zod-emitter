@@ -11,6 +11,7 @@ export interface ZodEmitterOptions {
 	"package-version"?: string;
 	"emit-middleware"?: boolean;
 	"middleware-file"?: string;
+	"open-decode"?: boolean;
 }
 
 const emitterOptionsSchema: JSONSchemaType<ZodEmitterOptions> = {
@@ -22,6 +23,7 @@ const emitterOptionsSchema: JSONSchemaType<ZodEmitterOptions> = {
 		"package-name": { type: "string", nullable: true },
 		"package-version": { type: "string", nullable: true },
 		"emit-middleware": { type: "boolean", nullable: true, default: true },
+		"open-decode": { type: "boolean", nullable: true, default: false },
 		"middleware-file": {
 			type: "string",
 			nullable: true,

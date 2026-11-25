@@ -304,6 +304,7 @@ option turns the whole output file off.
 
 ## Configuration Options
 
+- `open-decode`: Export `decode(schemaKey, value)` for tolerant response validation with generated schema names (default: `false`). `parse` and `safeParse` reject unknown enum values and discriminator tags.
 - `output-file`: Name of the output file (default: "schemas.ts")
 - `output-dir`: Output directory (defaults to emitter output directory)
 - `package-name`: Package name to include in generated file header (optional)
